@@ -108,3 +108,76 @@ When adding a model, include tests for:
 - a minimal forward pass
 
 The repository contains a small infrastructure test suite covering these conditions.
+
+## 9. Example: Graph Convolutional Network (GCN)
+
+The project includes a graph package for architectures that operate on node features and connectivity, with the shared graph validation logic living in `models/graph/base.py` and the model-specific implementation in `models/graph/gcn.py`.
+
+The GCN expects a graph input contract like:
+
+```python
+inputs = ModelInput(
+    node_features=torch.randn(N, F),
+    edge_index=torch.tensor([[src_0, src_1, ...], [dst_0, dst_1, ...]]),
+)
+```
+
+Input contract:
+
+- `node_features`: shape `[N, F]`
+- `edge_index`: shape `[2, E]`
+- optional: `coordinates`, `batch`, `edge_features` as metadata or future pipeline inputs
+
+Output contract:
+
+```python
+output = model(inputs)
+node_predictions = output.predictions
+# shape: [N, output_dim]
+```
+
+The model is intentionally node-centric. It does not assume that arbitrary edge features are part of the convolution. For future architectures such as MeshGraphNet or GAT, those signals will be handled explicitly by the model itself.
+
+Example usage:
+
+```python
+from models import ModelInput, create_model
+
+model = create_model({
+    "name": "gcn",
+    "input_dim": 4,
+    "output_dim": 2,
+    "hidden_dim": 64,
+    "num_layers": 3,
+    "activation": "gelu",
+    "dropout": 0.1,
+    "normalization": "layer_norm",
+    "residual": True,
+})
+
+inputs = ModelInput(
+    node_features=node_features,
+    edge_index=edge_index,
+)
+
+output = model(inputs)
+predictions = output.predictions
+```
+
+Example configuration:
+
+```yaml
+model:
+  name: gcn
+  input_dim: 8
+  output_dim: 3
+  hidden_dim: 128
+  num_layers: 4
+  activation: gelu
+  dropout: 0.0
+  normalization: layer_norm
+  residual: true
+  add_self_loops: true
+```
+
+The GCN inserts self-loops explicitly when enabled and preserves the user-provided edge direction unless the caller supplies a bidirectional edge list. This keeps the graph topology intentional and avoids surprising implicit rewrites.
