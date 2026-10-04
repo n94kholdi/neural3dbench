@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "3dneuralnetworks"
+version = "0.1.0"
+description = "Modular framework for 3D geometry and physics-informed neural networks"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "torch>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
