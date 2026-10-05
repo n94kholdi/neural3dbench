@@ -1,6 +1,6 @@
 from .base import BaseNetwork
 from .configs import BaseModelConfig
-from .graph import GAT, GATConfig, GCN, GCNConfig
+from .graph import GAT, GATConfig, GCN, GCNConfig, MeshGraphNet, MeshGraphNetConfig
 from .registry import ModelRegistry, create_model
 from .representations import (
     CoordinateRepresentationAdapter,
@@ -24,6 +24,8 @@ __all__ = [
     "ModelInput",
     "ModelOutput",
     "ModelRegistry",
+    "MeshGraphNet",
+    "MeshGraphNetConfig",
     "RepresentationAdapter",
     "create_model",
 ]
