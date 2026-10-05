@@ -85,6 +85,11 @@ def create_model(config: dict[str, Any] | BaseModelConfig | str | None = None, *
         return ModelRegistry.create(config, **kwargs)
     if config is None:
         raise ValueError("A model name or config must be provided.")
+    if isinstance(config, BaseModelConfig):
+        model_name = config.name or config.model_type
+        if not model_name:
+            raise ValueError("Model config must include a model name.")
+        return ModelRegistry.create(model_name, config=config, **kwargs)
     if not isinstance(config, dict):
         raise TypeError("Config must be a dict, BaseModelConfig, or model name string.")
 

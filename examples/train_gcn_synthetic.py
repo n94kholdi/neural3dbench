@@ -11,7 +11,7 @@ from torch import nn
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from models import GCNConfig, ModelInput, ModelOutput, ModelRegistry
+from models import GATConfig, GCNConfig, ModelInput, ModelOutput, ModelRegistry
 
 
 @dataclass
@@ -90,8 +90,9 @@ def evaluate(
     return sum(losses) / len(losses)
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Train the GCN on synthetic 3D graphs.")
+def parse_args(default_model: str = "gcn") -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Train a GCN or GAT on synthetic 3D graphs.")
+    parser.add_argument("--model", choices=("gcn", "gat"), default=default_model)
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--train-graphs", type=int, default=80)
     parser.add_argument("--val-graphs", type=int, default=20)
@@ -100,22 +101,33 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--k", type=int, default=6)
     parser.add_argument("--hidden-dim", type=int, default=64)
     parser.add_argument("--num-layers", type=int, default=3)
+    parser.add_argument("--num-heads", type=int, default=4, help="GAT attention heads")
     parser.add_argument("--learning-rate", type=float, default=1e-3)
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--checkpoint", type=Path, default=Path("checkpoints/gcn_synthetic.pt"))
+    parser.add_argument("--checkpoint", type=Path, default=None)
     args = parser.parse_args()
 
     if args.epochs < 1 or args.train_graphs < 1 or args.val_graphs < 1:
         parser.error("epochs, train-graphs, and val-graphs must be positive")
     if args.min_nodes < 2 or args.max_nodes < args.min_nodes:
         parser.error("require 2 <= min-nodes <= max-nodes")
-    if args.k < 1 or args.hidden_dim < 1 or args.num_layers < 1 or args.learning_rate <= 0:
-        parser.error("k, hidden-dim, num-layers, and learning-rate must be positive")
+    if (
+        args.k < 1
+        or args.hidden_dim < 1
+        or args.num_layers < 1
+        or args.num_heads < 1
+        or args.learning_rate <= 0
+    ):
+        parser.error("k, hidden-dim, num-layers, num-heads, and learning-rate must be positive")
+    if args.model == "gat" and args.hidden_dim % args.num_heads != 0:
+        parser.error("hidden-dim must be divisible by num-heads for GAT")
+    if args.checkpoint is None:
+        args.checkpoint = Path(f"checkpoints/{args.model}_synthetic.pt")
     return args
 
 
-def main() -> None:
-    args = parse_args()
+def main(default_model: str = "gcn") -> None:
+    args = parse_args(default_model=default_model)
     random.seed(args.seed)
     torch.manual_seed(args.seed)
     if torch.cuda.is_available():
@@ -130,13 +142,21 @@ def main() -> None:
         args.val_graphs, args.min_nodes, args.max_nodes, args.k, args.seed + 2
     )
 
-    config = GCNConfig(
-        input_dim=3,
-        hidden_dim=args.hidden_dim,
-        output_dim=1,
-        num_layers=args.num_layers,
-    )
-    model = ModelRegistry.create("gcn", config).to(device)
+    common_config = {
+        "input_dim": 3,
+        "hidden_dim": args.hidden_dim,
+        "output_dim": 1,
+        "num_layers": args.num_layers,
+    }
+    if args.model == "gat":
+        config = GATConfig(
+            **common_config,
+            num_heads=args.num_heads,
+            activation="elu",
+        )
+    else:
+        config = GCNConfig(**common_config)
+    model = ModelRegistry.create(args.model, config).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
     best_val_loss = float("inf")
     best_state = None

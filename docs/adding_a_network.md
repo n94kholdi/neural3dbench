@@ -181,3 +181,70 @@ model:
 ```
 
 The GCN inserts self-loops explicitly when enabled and preserves the user-provided edge direction unless the caller supplies a bidirectional edge list. This keeps the graph topology intentional and avoids surprising implicit rewrites.
+
+## 10. Graph Attention Network (GAT)
+
+GAT uses the same node-level input and output contract as GCN, but learns a
+different importance weight for every incoming neighbor and attention head.
+GCN aggregates neighbors using graph-convolution normalization; GAT normalizes
+learned attention scores over each node's incoming edges.
+
+```python
+from models import GATConfig, ModelInput, create_model
+
+config = GATConfig(
+    input_dim=3,
+    hidden_dim=64,
+    output_dim=1,
+    num_layers=3,
+    num_heads=4,
+    activation="elu",
+    dropout=0.1,
+    attention_dropout=0.1,
+    normalization="layer_norm",
+    residual=True,
+)
+model = create_model(config)
+output = model(ModelInput(node_features=x, edge_index=edge_index, batch=batch))
+prediction = output.predictions  # [N, output_dim]
+```
+
+Required inputs are floating-point `node_features` with shape `[N, input_dim]`
+and integer `edge_index` with shape `[2, E]`. An edge `[source, target]` sends a
+message from `source` to `target`, and attention is normalized across edges
+arriving at the same target. Undirected meshes should therefore supply both
+directions. Disconnected variable-sized graphs can be concatenated, with node
+indices offset per graph and an optional `[N]` batch vector. GAT performs no
+global pooling and returns `[N, output_dim]`; when supplied, the batch vector is
+also retained in `output.metadata["batch"]`.
+
+`num_heads` may be one integer for all layers or one value per layer, such as
+`[2, 4, 4]`. With `concat_heads=True`, head outputs are concatenated back to
+exactly `hidden_dim`, which must be divisible by every head count. With
+`concat_heads=False`, heads are averaged and each head produces `hidden_dim`.
+The final linear projection is independent of the head count, so attention
+never changes the requested prediction width.
+
+When `add_self_loops=True` (the default), existing self-loops are removed and
+exactly one self-loop per node is appended; non-self edges and their direction
+are preserved. When false, topology is used exactly as supplied. Duplicate
+non-self edges are not removed. Node coordinates and edge features are not
+implicitly concatenated or consumed.
+
+Set `return_attention_weights=True` to add a list under
+`output.auxiliary["attention_weights"]`, one item per layer. Each item contains
+the effective `edge_index` and normalized coefficients shaped `[E, heads]`.
+Extraction is disabled by default. Residual blocks use identity shortcuts when
+dimensions match and learned linear projections when they do not.
+
+The synthetic example trains either graph model on the same data and loop:
+
+```bash
+python examples/train_gcn_synthetic.py --model gat --num-heads 4
+python examples/train_gat_synthetic.py --num-heads 4
+python examples/train_gcn_synthetic.py --model gcn
+```
+
+GAT only predicts node fields. Data, physics, and boundary-condition losses
+remain responsibilities of the training system and can consume
+`output.predictions` without changes to this architecture.
