@@ -126,7 +126,93 @@ this implementation.
 The generic project model supports one edge set rather than DeepMind's named
 multi-edge-set container. This is sufficient for the standard mesh-edge base
 model requested here and keeps the established `ModelInput.edge_index` /
-`edge_features` contract. World edges, remeshing, multiscale processing,
-attention, and other advanced variants are intentionally excluded. Efficient
+`edge_features` contract. World edges, multiscale processing, attention, and
+other advanced variants are intentionally excluded. Optional deterministic 2D
+refinement is described below. Efficient
 PyTorch `index_add_` performs aggregation because the project has no PyG
 dependency; no Python loop runs over edges.
+
+## Optional adaptive mesh rollout
+
+Adaptive meshing is external to `MeshGraphNet`; fixed mode remains the default
+and does not compute indicators or copy/rebuild a mesh:
+
+```text
+fixed:     mesh -> graph -> MeshGraphNet -> task state update -> next step
+
+adaptive:  mesh -> graph -> MeshGraphNet -> task state update
+                                                    |
+                 next step <- rebuilt graph <- state transfer <- remesher
+                                                    ^              ^
+                                             correspondence   local variation
+```
+
+This is a **simplified initial adaptive implementation**, not an exact
+reproduction of the paper's learned anisotropic remesher. Its components are:
+
+- `TriangularMesh`: 2D vertices, triangle cells, explicit tagged boundary
+  edges, per-node data, per-cell material/region data, and refinement levels.
+- `LocalVariationCriterion`: maximum edge-wise gradient magnitude of a
+  configured scalar or vector state field in each triangle.
+- `TriangleCentroidRemesher`: replaces selected triangles with three valid
+  child triangles. It creates no hanging edge nodes, leaves boundary edges
+  unchanged, and makes children inherit parent cell data. It supports
+  refinement only; coarsening, edge flips, and anisotropic sizing are not
+  exposed as configuration.
+- `BarycentricStateTransfer`: averages continuous values from parent vertices.
+  Categorical values select a parent rather than being averaged. Boundary
+  metadata comes from geometry, and new interior nodes are not boundaries.
+- `TriangleMeshGraphBuilder`: recreates bidirectional connectivity and
+  `[dx, dy, distance]` features. Stale graph edges are never reused.
+- `MeshAdaptationController` owns scheduling and composition;
+  `MeshSimulationRunner` uses the same model and input/output contracts in both
+  modes.
+
+Configuration exposes only implemented behavior:
+
+```python
+from mesh import MeshAdaptationConfig, MeshMode
+
+fixed = MeshAdaptationConfig()
+adaptive = MeshAdaptationConfig(
+    mode=MeshMode.ADAPTIVE,
+    adapt_every=5,
+    criterion_field="temperature",
+    refinement_threshold=2.0,
+    max_nodes=20_000,
+    max_elements=40_000,
+    max_refinement_level=3,
+)
+```
+
+Run the localized-Gaussian example in both modes:
+
+```bash
+python examples/adaptive_meshgraphnet_synthetic.py --mesh-mode fixed
+python examples/adaptive_meshgraphnet_synthetic.py --mesh-mode adaptive
+```
+
+Topology decisions are discrete and outside autograd. Model inference remains
+unchanged and differentiable; barycentric transfer uses PyTorch operations. A
+future learned criterion can implement `AdaptationCriterion` without placing
+remeshing in `forward()`.
+
+### Relationship to the reference method
+
+Pfaff et al. predict a symmetric positive-definite sizing tensor at every node
+with a separate MeshGraphNet. A generic triangular remesher uses it to split
+invalid edges, flip edges with an anisotropic Delaunay criterion, collapse
+edges that do not create invalid neighbors, and flip again. Dynamics and sizing
+models are supervised separately; rollout updates dynamics, predicts sizing,
+then remeshes. The paper also estimates sizing targets from consecutive meshes.
+
+DeepMind's public repository includes the core model, fixed-mesh demonstration
+rollouts, adaptive trajectory datasets, and `*_dynamic_sizing` datasets with
+pre-remesh meshes and sizing-field targets. It does not publish the paper's
+local remesher. We reproduce the separation among dynamics, criterion,
+geometric remeshing, transfer, and graph reconstruction, while beginning with
+deterministic isotropic refinement.
+
+Optional PyTorch Geometric conversion is available through
+`TriangleMeshGraphBuilder.to_pyg_data()` when the `pyg` extra is installed. The
+established `ModelInput` path remains the dependency-free native interface.

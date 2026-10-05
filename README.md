@@ -42,3 +42,8 @@ output = model(ModelInput(
 ```
 
 New architectures can be added by implementing a model subclass, config, and model registry entry without changing the common training flow.
+
+MeshGraphNet also has an optional external adaptive-triangle rollout pipeline.
+See [the MeshGraphNet documentation](docs/meshgraphnet.md#optional-adaptive-mesh-rollout)
+and `examples/adaptive_meshgraphnet_synthetic.py`. Fixed mesh mode remains the
+default and both modes share the same neural architecture.
