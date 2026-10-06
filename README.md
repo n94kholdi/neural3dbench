@@ -1,6 +1,36 @@
-# 3D Neural Networks
+# Neural3DBench
 
-This project provides a lightweight, PyTorch-native foundation for physics-informed and geometry-aware neural models.
+Neural3DBench is a PyTorch-native framework for implementing and reproducibly
+benchmarking neural networks for 3D geometry and physics simulations.
+
+> [!NOTE]
+> The project is under active development. Its model API is usable, while the
+> common datasets, benchmark protocols, and published leaderboards are still
+> being developed.
+
+## Supported models
+
+| Model | Representation | Status |
+| --- | --- | --- |
+| Graph Convolutional Network (GCN) | Graph | Implemented |
+| Graph Attention Network (GAT) | Graph | Implemented |
+| MeshGraphNet | Mesh graph | Implemented |
+| Adaptive MeshGraphNet | Adaptive mesh graph | Experimental |
+
+## Installation
+
+Neural3DBench requires Python 3.10 or newer. For local development:
+
+```bash
+git clone https://github.com/YOUR_USERNAME/neural3dbench.git
+cd neural3dbench
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -e ".[dev,pyg]"
+```
+
+The `pyg` extra is optional and installs PyTorch Geometric support.
 
 ## Architecture overview
 
@@ -26,19 +56,25 @@ The framework intentionally avoids hard-coding assumptions about graphs, point c
 - `models.ModelRegistry`: registry/factory for model creation
 - `models.RepresentationAdapter`: interface for representation conversion
 
-## Example
+## Quick start
 
 ```python
-from models import ModelInput, ModelRegistry
+import torch
 
-ModelRegistry.register("dummy_graph", DummyGraphModel)
+from models import GCNConfig, ModelInput, ModelRegistry
 
-model = ModelRegistry.create("dummy_graph", {"name": "dummy_graph", "hidden_dim": 64})
+model = ModelRegistry.create(
+    "gcn",
+    GCNConfig(input_dim=3, hidden_dim=64, output_dim=1),
+)
 output = model(ModelInput(
-    coordinates=[[0.0, 0.0], [1.0, 0.0]],
-    node_features=[[1.0], [2.0]],
-    edge_index=[[0, 1], [1, 0]],
+    node_features=torch.tensor([
+        [0.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+    ]),
+    edge_index=torch.tensor([[0, 1], [1, 0]]),
 ))
+print(output.predictions)
 ```
 
 New architectures can be added by implementing a model subclass, config, and model registry entry without changing the common training flow.
@@ -47,3 +83,25 @@ MeshGraphNet also has an optional external adaptive-triangle rollout pipeline.
 See [the MeshGraphNet documentation](docs/meshgraphnet.md#optional-adaptive-mesh-rollout)
 and `examples/adaptive_meshgraphnet_synthetic.py`. Fixed mesh mode remains the
 default and both modes share the same neural architecture.
+
+Run the test suite with:
+
+```bash
+pytest
+```
+
+## Benchmarking roadmap
+
+The public benchmark suite will standardize datasets and splits, training
+budgets, evaluation metrics, random seeds, and machine-readable result files.
+Until that protocol is published, results from the example scripts should be
+treated as development checks rather than comparable benchmark scores.
+
+## Contributing
+
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the local
+development and pull-request workflow.
+
+## License
+
+Neural3DBench is licensed under the [Apache License 2.0](LICENSE).

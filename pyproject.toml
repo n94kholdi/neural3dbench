@@ -3,11 +3,27 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "3dneuralnetworks"
+name = "neural3dbench"
 version = "0.1.0"
-description = "Modular framework for 3D geometry and physics-informed neural networks"
+description = "Reproducible benchmarks for neural networks on 3D geometry and physics simulations"
 readme = "README.md"
 requires-python = ">=3.10"
+license = "Apache-2.0"
+keywords = [
+  "3d-deep-learning",
+  "geometric-deep-learning",
+  "graph-neural-networks",
+  "meshgraphnet",
+  "physics-ml",
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 dependencies = [
   "torch>=2.0.0",
 ]
@@ -19,6 +35,10 @@ dev = [
 pyg = [
   "torch-geometric>=2.4.0",
 ]
+
+[tool.setuptools.packages.find]
+include = ["mesh*", "models*", "simulation*"]
+exclude = ["checkpoints*", "docs*", "examples*", "tests*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
