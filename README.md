@@ -17,6 +17,8 @@ benchmarking neural networks for 3D geometry and physics simulations.
 | MeshGraphNet | Mesh graph | Implemented |
 | Adaptive MeshGraphNet | Adaptive mesh graph | Experimental |
 | PointNet | Point cloud | Implemented |
+| PointNet++ | Hierarchical point cloud | Implemented |
+| 3D U-Net | Structured voxel grid | Implemented |
 
 ## Installation
 
@@ -84,6 +86,15 @@ PointNet supports both global classification and point-wise prediction from
 unordered `[B, N, 3]` point clouds, with optional per-point features. See
 [the PointNet documentation](docs/pointnet.md) for configuration, mesh-to-point
 conversion, visualization, and synthetic examples.
+
+PointNet++ adds farthest-point sampling, radius neighborhoods, hierarchical set
+abstraction, and feature propagation while keeping the same input and task
+interfaces. See [the PointNet++ documentation](docs/pointnet2.md).
+
+3D U-Net provides dense volumetric segmentation and scalar/vector field
+prediction for `[B, C, D, H, W]` voxel grids. It includes separate point/mesh
+voxelization helpers and orthogonal slice visualization. See
+[the 3D U-Net documentation](docs/unet3d.md).
 
 MeshGraphNet also has an optional external adaptive-triangle rollout pipeline.
 See [the MeshGraphNet documentation](docs/meshgraphnet.md#optional-adaptive-mesh-rollout)

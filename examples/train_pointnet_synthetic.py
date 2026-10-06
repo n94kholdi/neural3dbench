@@ -1,4 +1,4 @@
-"""Small PointNet checks for shape classification and point-wise regression."""
+"""Small PointNet/PointNet++ checks for classification and point regression."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from pathlib import Path
 import torch
 from torch.nn import functional as F
 
-from models import ModelInput, PointNetConfig, create_model
+from models import ModelInput, PointNet2Config, PointNetConfig, create_model
 from models.pointnet import feature_transform_regularizer
 from pointcloud import normalize_points, plot_point_cloud
 
@@ -68,6 +68,7 @@ def iterate_minibatches(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--model", choices=("pointnet", "pointnet2"), default="pointnet")
     parser.add_argument(
         "--task", choices=("classification", "segmentation"), default="classification"
     )
@@ -105,16 +106,26 @@ def main() -> None:
     if validation_points.shape[0] == 0:
         validation_points, validation_targets = train_points, train_targets
 
-    config = PointNetConfig(
-        input_dim=3,
-        output_dim=output_dim,
-        task=args.task,
-        global_dim=1024,
-        dropout=0.3,
-    )
+    common_config = {
+        "input_dim": 3,
+        "output_dim": output_dim,
+        "task": args.task,
+        "global_dim": 1024,
+        "dropout": 0.3,
+    }
+    if args.model == "pointnet2":
+        first_count = min(64, args.num_points)
+        config = PointNet2Config(
+            sample_counts=(first_count, min(16, first_count)),
+            radii=(0.25, 0.5),
+            neighbor_counts=(16, 32),
+            **common_config,
+        )
+    else:
+        config = PointNetConfig(**common_config)
     model = create_model(config)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
-    checkpoint = args.checkpoint or Path(f"checkpoints/pointnet_{args.task}.pt")
+    checkpoint = args.checkpoint or Path(f"checkpoints/{args.model}_{args.task}.pt")
 
     for epoch in range(1, args.epochs + 1):
         model.train()
@@ -132,7 +143,7 @@ def main() -> None:
                 if args.task == "classification"
                 else F.mse_loss(prediction, batch_targets)
             )
-            feature_transform = output.auxiliary["feature_transform"]
+            feature_transform = output.auxiliary.get("feature_transform")
             if feature_transform is not None:
                 loss = loss + 1e-3 * feature_transform_regularizer(feature_transform)
             optimizer.zero_grad()
@@ -165,14 +176,14 @@ def main() -> None:
             plot_point_cloud(
                 validation_points[0],
                 predicted_class=SHAPES[predicted],
-                title="PointNet shape classification",
+                title=f"{args.model} shape classification",
             )
         else:
             plot_point_cloud(
                 validation_points[0],
                 ground_truth=validation_targets[0],
                 prediction=validation_prediction[0],
-                title="PointNet radial field",
+                title=f"{args.model} radial field",
             )
 
 

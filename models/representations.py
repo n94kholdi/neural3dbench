@@ -77,12 +77,13 @@ class GridRepresentationAdapter(RepresentationAdapter):
         if isinstance(raw_data, Mapping):
             payload = dict(raw_data)
         else:
-            payload = {"grid": raw_data}
+            payload = {"grid": raw_data, "voxel_fields": raw_data}
 
         return ModelInput(
             grid=payload.get("grid"),
-            voxel_fields=payload.get("voxel_fields"),
+            voxel_fields=payload.get("voxel_fields", payload.get("grid")),
             material_properties=payload.get("material_properties"),
+            boundary_mask=payload.get("boundary_mask", payload.get("geometry_mask")),
             metadata=payload.get("metadata", {}),
             representation="GRID",
             **kwargs,

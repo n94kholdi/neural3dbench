@@ -40,7 +40,7 @@ viz = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["mesh*", "models*", "pointcloud*", "simulation*"]
+include = ["mesh*", "models*", "pointcloud*", "simulation*", "volumetric*"]
 exclude = ["checkpoints*", "docs*", "examples*", "tests*"]
 
 [tool.pytest.ini_options]
