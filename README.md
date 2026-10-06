@@ -16,6 +16,7 @@ benchmarking neural networks for 3D geometry and physics simulations.
 | Graph Attention Network (GAT) | Graph | Implemented |
 | MeshGraphNet | Mesh graph | Implemented |
 | Adaptive MeshGraphNet | Adaptive mesh graph | Experimental |
+| PointNet | Point cloud | Implemented |
 
 ## Installation
 
@@ -78,6 +79,11 @@ print(output.predictions)
 ```
 
 New architectures can be added by implementing a model subclass, config, and model registry entry without changing the common training flow.
+
+PointNet supports both global classification and point-wise prediction from
+unordered `[B, N, 3]` point clouds, with optional per-point features. See
+[the PointNet documentation](docs/pointnet.md) for configuration, mesh-to-point
+conversion, visualization, and synthetic examples.
 
 MeshGraphNet also has an optional external adaptive-triangle rollout pipeline.
 See [the MeshGraphNet documentation](docs/meshgraphnet.md#optional-adaptive-mesh-rollout)

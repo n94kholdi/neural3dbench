@@ -35,9 +35,12 @@ dev = [
 pyg = [
   "torch-geometric>=2.4.0",
 ]
+viz = [
+  "matplotlib>=3.7.0",
+]
 
 [tool.setuptools.packages.find]
-include = ["mesh*", "models*", "simulation*"]
+include = ["mesh*", "models*", "pointcloud*", "simulation*"]
 exclude = ["checkpoints*", "docs*", "examples*", "tests*"]
 
 [tool.pytest.ini_options]

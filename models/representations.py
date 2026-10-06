@@ -49,6 +49,29 @@ class CoordinateRepresentationAdapter(RepresentationAdapter):
         )
 
 
+class PointCloudRepresentationAdapter(RepresentationAdapter):
+    """Adapt point arrays or mappings to the PointNet input contract.
+
+    Mappings may use either ``coordinates``/``point_features`` or the more
+    domain-friendly aliases ``points``/``features``.
+    """
+
+    def adapt(self, raw_data: Any, **kwargs) -> ModelInput:
+        if isinstance(raw_data, Mapping):
+            payload = dict(raw_data)
+        else:
+            payload = {"coordinates": raw_data}
+
+        return ModelInput(
+            coordinates=payload.get("coordinates", payload.get("points")),
+            point_features=payload.get("point_features", payload.get("features")),
+            point_mask=payload.get("point_mask", payload.get("mask")),
+            metadata=payload.get("metadata", {}),
+            representation="POINT_CLOUD",
+            **kwargs,
+        )
+
+
 class GridRepresentationAdapter(RepresentationAdapter):
     def adapt(self, raw_data: Any, **kwargs) -> ModelInput:
         if isinstance(raw_data, Mapping):

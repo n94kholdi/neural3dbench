@@ -22,6 +22,7 @@ class ModelInput:
     edge_index: Any = None
     edge_features: Any = None
     point_features: Any = None
+    point_mask: Any = None
     grid: Any = None
     voxel_fields: Any = None
     boundary_conditions: Any = None
@@ -42,6 +43,7 @@ class ModelInput:
             "edge_index",
             "edge_features",
             "point_features",
+            "point_mask",
             "grid",
             "voxel_fields",
             "boundary_conditions",
