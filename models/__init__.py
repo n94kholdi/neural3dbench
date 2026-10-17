@@ -1,6 +1,7 @@
 from .base import BaseNetwork
 from .configs import BaseModelConfig
 from .fno import FNO3D, FNO3DConfig, SpectralConv3d
+from .gino import GINO, GINOConfig
 from .graph import GAT, GATConfig, GCN, GCNConfig, MeshGraphNet, MeshGraphNetConfig
 from .pointnet import PointNet, PointNetConfig
 from .pointnet2 import PointNet2, PointNet2Config
@@ -23,6 +24,8 @@ __all__ = [
     "CoordinateRepresentationAdapter",
     "FNO3D",
     "FNO3DConfig",
+    "GINO",
+    "GINOConfig",
     "GAT",
     "GATConfig",
     "GCN",

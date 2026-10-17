@@ -23,6 +23,7 @@ class ModelInput:
     edge_features: Any = None
     point_features: Any = None
     point_mask: Any = None
+    query_coordinates: Any = None
     grid: Any = None
     voxel_fields: Any = None
     boundary_conditions: Any = None
@@ -44,6 +45,7 @@ class ModelInput:
             "edge_features",
             "point_features",
             "point_mask",
+            "query_coordinates",
             "grid",
             "voxel_fields",
             "boundary_conditions",

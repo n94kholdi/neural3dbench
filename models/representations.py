@@ -66,6 +66,9 @@ class PointCloudRepresentationAdapter(RepresentationAdapter):
             coordinates=payload.get("coordinates", payload.get("points")),
             point_features=payload.get("point_features", payload.get("features")),
             point_mask=payload.get("point_mask", payload.get("mask")),
+            query_coordinates=payload.get(
+                "query_coordinates", kwargs.pop("query_coordinates", None)
+            ),
             metadata=payload.get("metadata", {}),
             representation="POINT_CLOUD",
             **kwargs,
