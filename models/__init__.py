@@ -1,5 +1,6 @@
 from .base import BaseNetwork
 from .configs import BaseModelConfig
+from .deep_nurbs import DeepNURBS, DeepNURBSConfig
 from .fno import FNO3D, FNO3DConfig, SpectralConv3d
 from .gino import GINO, GINOConfig
 from .graph import GAT, GATConfig, GCN, GCNConfig, MeshGraphNet, MeshGraphNetConfig
@@ -22,6 +23,8 @@ __all__ = [
     "BaseModelConfig",
     "BaseNetwork",
     "CoordinateRepresentationAdapter",
+    "DeepNURBS",
+    "DeepNURBSConfig",
     "FNO3D",
     "FNO3DConfig",
     "GINO",

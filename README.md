@@ -22,6 +22,7 @@ benchmarking neural networks for 3D geometry and physics simulations.
 | Fourier Neural Operator (FNO3D) | Structured 3D grid | Implemented |
 | Transolver | Irregular points / mesh nodes | Implemented |
 | SIREN | Continuous coordinates / irregular points | Implemented |
+| Deep NURBS | NURBS parameterized 2D domains | Implemented |
 
 ## Installation
 
@@ -122,6 +123,13 @@ and can serve as the function approximator in physics-informed training; it is
 not itself a PINN or a neural operator. See [the SIREN documentation](docs/siren.md)
 for initialization, tensor contracts, derivatives, masking, and the synthetic
 3D field example.
+
+Deep NURBS combines a NURBS admissible field with a shallow coordinate MLP to
+represent PDE trial solutions while strongly imposing homogeneous Dirichlet
+conditions. It also evaluates the configured NURBS surface to map parametric
+coordinates to physical coordinates. The model does not include a PDE loss or
+training loop. See [the Deep NURBS documentation](docs/deep_nurbs.md) for the
+paper, geometry contract, and configuration details.
 
 Run the test suite with:
 
