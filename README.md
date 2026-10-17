@@ -19,6 +19,7 @@ benchmarking neural networks for 3D geometry and physics simulations.
 | PointNet | Point cloud | Implemented |
 | PointNet++ | Hierarchical point cloud | Implemented |
 | 3D U-Net | Structured voxel grid | Implemented |
+| Fourier Neural Operator (FNO3D) | Structured 3D grid | Implemented |
 | Transolver | Irregular points / mesh nodes | Implemented |
 
 ## Installation
@@ -96,6 +97,12 @@ interfaces. See [the PointNet++ documentation](docs/pointnet2.md).
 prediction for `[B, C, D, H, W]` voxel grids. It includes separate point/mesh
 voxelization helpers and orthogonal slice visualization. See
 [the 3D U-Net documentation](docs/unet3d.md).
+
+FNO3D learns dense operators between physical fields on regular 3D grids using
+truncated spectral convolutions plus pointwise local branches. It preserves
+`[B, C, D, H, W]` resolution and can append normalized grid coordinates. It is
+not an irregular point-cloud or mesh model. See [the FNO documentation](docs/fno.md)
+for mode indexing, boundary assumptions, training, and benchmarking.
 
 MeshGraphNet also has an optional external adaptive-triangle rollout pipeline.
 See [the MeshGraphNet documentation](docs/meshgraphnet.md#optional-adaptive-mesh-rollout)
