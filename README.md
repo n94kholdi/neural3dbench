@@ -21,6 +21,7 @@ benchmarking neural networks for 3D geometry and physics simulations.
 | 3D U-Net | Structured voxel grid | Implemented |
 | Fourier Neural Operator (FNO3D) | Structured 3D grid | Implemented |
 | Transolver | Irregular points / mesh nodes | Implemented |
+| SIREN | Continuous coordinates / irregular points | Implemented |
 
 ## Installation
 
@@ -114,6 +115,13 @@ requiring mesh edges. Its Physics-Attention layers aggregate points into learned
 physical-state slices, attend among those slices, and map information back to
 points. See [the Transolver documentation](docs/transolver.md) for tensor shapes,
 configuration, reference-fidelity notes, synthetic training, and benchmarking.
+
+SIREN represents a continuous field with a coordinate-to-value sine network.
+It evaluates irregular points independently, supports coordinate derivatives,
+and can serve as the function approximator in physics-informed training; it is
+not itself a PINN or a neural operator. See [the SIREN documentation](docs/siren.md)
+for initialization, tensor contracts, derivatives, masking, and the synthetic
+3D field example.
 
 Run the test suite with:
 
