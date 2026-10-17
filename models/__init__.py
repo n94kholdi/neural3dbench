@@ -3,6 +3,7 @@ from .configs import BaseModelConfig
 from .graph import GAT, GATConfig, GCN, GCNConfig, MeshGraphNet, MeshGraphNetConfig
 from .pointnet import PointNet, PointNetConfig
 from .pointnet2 import PointNet2, PointNet2Config
+from .transolver import Transolver, TransolverConfig
 from .unet3d import UNet3D, UNet3DConfig
 from .registry import ModelRegistry, create_model
 from .representations import (
@@ -36,6 +37,8 @@ __all__ = [
     "PointNet2",
     "PointNet2Config",
     "RepresentationAdapter",
+    "Transolver",
+    "TransolverConfig",
     "UNet3D",
     "UNet3DConfig",
     "create_model",

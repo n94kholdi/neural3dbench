@@ -19,6 +19,7 @@ benchmarking neural networks for 3D geometry and physics simulations.
 | PointNet | Point cloud | Implemented |
 | PointNet++ | Hierarchical point cloud | Implemented |
 | 3D U-Net | Structured voxel grid | Implemented |
+| Transolver | Irregular points / mesh nodes | Implemented |
 
 ## Installation
 
@@ -100,6 +101,12 @@ MeshGraphNet also has an optional external adaptive-triangle rollout pipeline.
 See [the MeshGraphNet documentation](docs/meshgraphnet.md#optional-adaptive-mesh-rollout)
 and `examples/adaptive_meshgraphnet_synthetic.py`. Fixed mesh mode remains the
 default and both modes share the same neural architecture.
+
+Transolver predicts point-wise physical fields on irregular domains without
+requiring mesh edges. Its Physics-Attention layers aggregate points into learned
+physical-state slices, attend among those slices, and map information back to
+points. See [the Transolver documentation](docs/transolver.md) for tensor shapes,
+configuration, reference-fidelity notes, synthetic training, and benchmarking.
 
 Run the test suite with:
 

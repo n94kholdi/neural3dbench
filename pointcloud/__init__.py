@@ -5,6 +5,7 @@ from .data import (
     normalize_points,
     sample_points,
 )
+from .losses import pointwise_regression_loss
 from .visualization import plot_point_cloud
 
 __all__ = [
@@ -13,5 +14,6 @@ __all__ = [
     "mesh_to_point_cloud",
     "normalize_points",
     "plot_point_cloud",
+    "pointwise_regression_loss",
     "sample_points",
 ]
