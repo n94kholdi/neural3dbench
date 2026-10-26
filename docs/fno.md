@@ -165,7 +165,7 @@ The smoke integration creates a rounded box, saves and reloads
 trip:
 
 ```bash
-.venv/bin/python neural3dbench/examples/geocore_fno3d_integration.py \
+.venv/bin/python neural3dbench/examples/geocore/geocore_fno3d_integration.py \
   --output-dir outputs/fno3d_geocore_smoke
 ```
 
@@ -175,9 +175,9 @@ reference operator and saves the canonical interchange input, checkpoint, and
 validation tensors. A companion command renders middle-plane previews:
 
 ```bash
-.venv/bin/python neural3dbench/examples/train_fno3d_geocore_heat.py \
+.venv/bin/python neural3dbench/examples/geocore/train_fno3d_geocore_heat.py \
   --device cpu --output-dir outputs/fno3d_geocore_heat
-.venv/bin/python neural3dbench/examples/preview_fno3d_geocore_heat.py \
+.venv/bin/python neural3dbench/examples/geocore/preview_fno3d_geocore_heat.py \
   --output-dir outputs/fno3d_geocore_heat
 ```
 

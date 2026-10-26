@@ -96,8 +96,8 @@ This representation can also serve 3D U-Net.
 In neural3dbench, load the canonical mapping and pass it through
 `GridRepresentationAdapter`. The adapter retains `voxel_fields` and metadata
 while translating the interchange name `VOXEL_GRID` to the models' internal
-representation name `GRID`. See `examples/geocore_fno3d_integration.py` and
-`examples/train_fno3d_geocore_heat.py` for validated and trained paths.
+representation name `GRID`. See `examples/geocore/geocore_fno3d_integration.py` and
+`examples/geocore/train_fno3d_geocore_heat.py` for validated and trained paths.
 
 ## 4. Deep NURBS — parametric surface
 
@@ -125,7 +125,7 @@ Requirements:
 - Knot vectors must be clamped and nondecreasing.
 - The admissible coefficients must be zero on all four boundaries.
 
-Current limitation: Deep NURBS accepts only physical control points shaped `[Nu,Nv,2]`. It represents a 2D physical domain, not a general 3D NURBS surface. Geometry data is model configuration rather than normal runtime `ModelInput`. Use `DeepNURBSConfig.from_parametric_surface(payload)` for the geometry and `ParametricSurfaceRepresentationAdapter().adapt(payload)` for the sampled runtime coordinates. See `examples/geocore_deep_nurbs_integration.py` for the validated save/reload path.
+Current limitation: Deep NURBS accepts only physical control points shaped `[Nu,Nv,2]`. It represents a 2D physical domain, not a general 3D NURBS surface. Geometry data is model configuration rather than normal runtime `ModelInput`. Use `DeepNURBSConfig.from_parametric_surface(payload)` for the geometry and `ParametricSurfaceRepresentationAdapter().adapt(payload)` for the sampled runtime coordinates. See `examples/geocore/geocore_deep_nurbs_integration.py` for the validated save/reload path.
 
 In summary:
 

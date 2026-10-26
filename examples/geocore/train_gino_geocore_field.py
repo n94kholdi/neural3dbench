@@ -5,7 +5,7 @@ a compact integration problem, not a validated physical solver.
 
 Run from the workspace root:
 
-    .venv/bin/python neural3dbench/examples/train_gino_geocore_field.py
+    .venv/bin/python neural3dbench/examples/geocore/train_gino_geocore_field.py
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ import torch
 from torch import nn
 
 
-WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
+WORKSPACE_ROOT = Path(__file__).resolve().parents[3]
 NEURAL3DBENCH_ROOT = WORKSPACE_ROOT / "neural3dbench"
 GEOCORE_ROOT = WORKSPACE_ROOT / "geometry-py" / "geocore"
 for source_root in (NEURAL3DBENCH_ROOT, GEOCORE_ROOT):

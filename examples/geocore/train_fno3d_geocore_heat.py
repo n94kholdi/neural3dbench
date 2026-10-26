@@ -6,7 +6,7 @@ reference diffusion operator produces the target temperature field.
 
 Run from the workspace root:
 
-    .venv/bin/python neural3dbench/examples/train_fno3d_geocore_heat.py
+    .venv/bin/python neural3dbench/examples/geocore/train_fno3d_geocore_heat.py
 
 This is an educational dense-grid operator problem, not a validated heat solver.
 """
@@ -24,7 +24,7 @@ from torch import nn
 from torch.nn import functional as F
 
 
-WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
+WORKSPACE_ROOT = Path(__file__).resolve().parents[3]
 NEURAL3DBENCH_ROOT = WORKSPACE_ROOT / "neural3dbench"
 GEOCORE_ROOT = WORKSPACE_ROOT / "geometry-py" / "geocore"
 for source_root in (NEURAL3DBENCH_ROOT, GEOCORE_ROOT):

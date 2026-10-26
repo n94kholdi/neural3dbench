@@ -94,7 +94,7 @@ source features and separate query coordinates, then checks GINO inference and
 gradients:
 
 ```bash
-.venv/bin/python neural3dbench/examples/geocore_gino_integration.py
+.venv/bin/python neural3dbench/examples/geocore/geocore_gino_integration.py
 pytest -q neural3dbench/tests/test_gino.py neural3dbench/tests/test_geocore_gino_integration.py
 ```
 
@@ -103,8 +103,8 @@ analytic Gaussian source fields, trains GINO to predict those fields at
 separate query points, and saves a checkpoint plus validation arrays:
 
 ```bash
-.venv/bin/python neural3dbench/examples/train_gino_geocore_field.py
-.venv/bin/python neural3dbench/examples/preview_gino_geocore_field.py
+.venv/bin/python neural3dbench/examples/geocore/train_gino_geocore_field.py
+.venv/bin/python neural3dbench/examples/geocore/preview_gino_geocore_field.py
 ```
 
 The preview compares source values, query targets, predictions, and absolute

@@ -6,7 +6,7 @@ This is a compact CPU training/serialization example, not a benchmark result.
 
 Run from the workspace root:
 
-    .venv/bin/python neural3dbench/examples/train_deep_nurbs_geocore_field.py
+    .venv/bin/python neural3dbench/examples/geocore/train_deep_nurbs_geocore_field.py
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ import torch
 from torch.nn import functional as F
 
 
-WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
+WORKSPACE_ROOT = Path(__file__).resolve().parents[3]
 NEURAL3DBENCH_ROOT = WORKSPACE_ROOT / "neural3dbench"
 GEOCORE_ROOT = WORKSPACE_ROOT / "geometry-py" / "geocore"
 for source_root in (NEURAL3DBENCH_ROOT, GEOCORE_ROOT):

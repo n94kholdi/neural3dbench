@@ -117,7 +117,7 @@ solver, and evaluates an autoregressive rollout, run from the shared workspace
 root:
 
 ```bash
-.venv/bin/python neural3dbench/examples/train_meshgraphnet_geocore_heat.py
+.venv/bin/python neural3dbench/examples/geocore/train_meshgraphnet_geocore_heat.py
 ```
 
 The official `cylinder_flow` and `flag_simple` datasets can later be adapted by

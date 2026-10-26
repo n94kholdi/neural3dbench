@@ -251,7 +251,7 @@ GAT forward/backward pass. Undirected mesh connections retain geocore's two
 directed entries per edge (`sender -> receiver` and `receiver -> sender`):
 
 ```bash
-.venv/bin/python neural3dbench/examples/geocore_gat_integration.py
+.venv/bin/python neural3dbench/examples/geocore/geocore_gat_integration.py
 pytest neural3dbench/tests/test_gat.py neural3dbench/tests/test_geocore_gat_integration.py
 ```
 
@@ -260,8 +260,8 @@ graph, checkpoint, and prediction arrays. Preview its target, prediction, and
 absolute error with:
 
 ```bash
-.venv/bin/python neural3dbench/examples/train_gat_geocore_field.py
-.venv/bin/python neural3dbench/examples/preview_gat_geocore_field.py
+.venv/bin/python neural3dbench/examples/geocore/train_gat_geocore_field.py
+.venv/bin/python neural3dbench/examples/geocore/preview_gat_geocore_field.py
 ```
 
 GAT only predicts node fields. Data, physics, and boundary-condition losses

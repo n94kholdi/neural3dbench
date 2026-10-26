@@ -2,7 +2,7 @@
 
 Run from the workspace root with:
 
-    .venv/bin/python neural3dbench/examples/train_gat_geocore_field.py
+    .venv/bin/python neural3dbench/examples/geocore/train_gat_geocore_field.py
 """
 
 from __future__ import annotations

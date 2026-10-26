@@ -2,7 +2,7 @@
 
 Run from any directory with:
 
-    python neural3dbench/examples/geocore_meshgraphnet_integration.py
+    python neural3dbench/examples/geocore/geocore_meshgraphnet_integration.py
 
 The model is randomly initialized, so this example verifies interoperability,
 tensor shapes, inference, and gradients rather than prediction accuracy.
@@ -22,7 +22,7 @@ import torch
 # Keep this example runnable from a source checkout without installing either
 # sibling package. Installed packages continue to work because these are their
 # source roots.
-WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
+WORKSPACE_ROOT = Path(__file__).resolve().parents[3]
 NEURAL3DBENCH_ROOT = WORKSPACE_ROOT / "neural3dbench"
 GEOCORE_ROOT = WORKSPACE_ROOT / "geometry-py" / "geocore"
 for source_root in (NEURAL3DBENCH_ROOT, GEOCORE_ROOT):

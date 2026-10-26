@@ -114,14 +114,14 @@ model = create_model(config)
 prediction = model(model_input).predictions
 ```
 
-`examples/geocore_deep_nurbs_integration.py` creates a curved quarter-annulus,
+`examples/geocore/geocore_deep_nurbs_integration.py` creates a curved quarter-annulus,
 validates/saves/reloads `parametric_surface.npz`, checks physical coordinates,
 CPU gradients, and checkpoint restoration. The focused training example fits a
 manufactured zero-Dirichlet field and saves metrics and visualization inputs:
 
 ```bash
-python examples/train_deep_nurbs_geocore_field.py --device cpu
-python examples/preview_deep_nurbs_geocore_field.py
+python examples/geocore/train_deep_nurbs_geocore_field.py --device cpu
+python examples/geocore/preview_deep_nurbs_geocore_field.py
 pytest tests/test_deep_nurbs.py tests/test_geocore_deep_nurbs_integration.py
 ```
 

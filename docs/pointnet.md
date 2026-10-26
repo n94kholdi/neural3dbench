@@ -99,7 +99,7 @@ test also verifies optional surface-normal features and a PointNet backward
 pass:
 
 ```bash
-.venv/bin/python neural3dbench/examples/geocore_pointnet_integration.py
+.venv/bin/python neural3dbench/examples/geocore/geocore_pointnet_integration.py
 ```
 
 The training example classifies geocore-generated sphere, box, and cylinder
@@ -107,8 +107,8 @@ surface clouds. It saves `point_cloud.npz`, a model checkpoint, validation
 predictions, and non-interactive PNG previews:
 
 ```bash
-.venv/bin/python neural3dbench/examples/train_pointnet_geocore_shapes.py
-.venv/bin/python neural3dbench/examples/preview_pointnet_geocore_shapes.py
+.venv/bin/python neural3dbench/examples/geocore/train_pointnet_geocore_shapes.py
+.venv/bin/python neural3dbench/examples/geocore/preview_pointnet_geocore_shapes.py
 ```
 
 ## Limitation

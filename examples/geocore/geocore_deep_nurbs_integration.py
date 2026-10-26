@@ -2,7 +2,7 @@
 
 Run from the workspace root:
 
-    .venv/bin/python neural3dbench/examples/geocore_deep_nurbs_integration.py
+    .venv/bin/python neural3dbench/examples/geocore/geocore_deep_nurbs_integration.py
 
 The check saves and reloads the interchange file, constructs both the model
 configuration and runtime input from it, and verifies CPU gradients and a
@@ -21,7 +21,7 @@ import numpy as np
 import torch
 
 
-WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
+WORKSPACE_ROOT = Path(__file__).resolve().parents[3]
 NEURAL3DBENCH_ROOT = WORKSPACE_ROOT / "neural3dbench"
 GEOCORE_ROOT = WORKSPACE_ROOT / "geometry-py" / "geocore"
 for source_root in (NEURAL3DBENCH_ROOT, GEOCORE_ROOT):

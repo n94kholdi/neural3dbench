@@ -11,7 +11,7 @@ The example follows the complete integration path:
 
 Run from the workspace root:
 
-    .venv/bin/python neural3dbench/examples/train_meshgraphnet_geocore_heat.py
+    .venv/bin/python neural3dbench/examples/geocore/train_meshgraphnet_geocore_heat.py
 
 This is a small educational problem, not a replacement for a validated FEM or
 CFD heat solver.
@@ -30,7 +30,7 @@ import torch
 from torch import nn
 
 
-WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
+WORKSPACE_ROOT = Path(__file__).resolve().parents[3]
 NEURAL3DBENCH_ROOT = WORKSPACE_ROOT / "neural3dbench"
 GEOCORE_ROOT = WORKSPACE_ROOT / "geometry-py" / "geocore"
 for source_root in (NEURAL3DBENCH_ROOT, GEOCORE_ROOT):

@@ -7,7 +7,7 @@ import numpy as np
 
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
-EXAMPLES_ROOT = WORKSPACE_ROOT / "neural3dbench" / "examples"
+EXAMPLES_ROOT = WORKSPACE_ROOT / "neural3dbench" / "examples" / "geocore"
 GEOCORE_ROOT = WORKSPACE_ROOT / "geometry-py" / "geocore"
 for source_root in (EXAMPLES_ROOT, GEOCORE_ROOT):
     source = str(source_root)

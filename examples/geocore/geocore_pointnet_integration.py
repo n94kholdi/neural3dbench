@@ -2,7 +2,7 @@
 
 Run from any directory with:
 
-    python neural3dbench/examples/geocore_pointnet_integration.py
+    python neural3dbench/examples/geocore/geocore_pointnet_integration.py
 
 The model is randomly initialized, so this example verifies the serialized
 point-cloud contract, adapter, inference, and gradients rather than accuracy.
@@ -19,7 +19,7 @@ import numpy as np
 import torch
 
 
-WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
+WORKSPACE_ROOT = Path(__file__).resolve().parents[3]
 NEURAL3DBENCH_ROOT = WORKSPACE_ROOT / "neural3dbench"
 GEOCORE_ROOT = WORKSPACE_ROOT / "geometry-py" / "geocore"
 for source_root in (NEURAL3DBENCH_ROOT, GEOCORE_ROOT):
