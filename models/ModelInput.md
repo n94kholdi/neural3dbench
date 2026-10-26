@@ -49,6 +49,7 @@ representation = "POINT_CLOUD"
 coordinates         float32 [B, N, 3]  required
 point_features      float32 [B, N, F]  optional
 point_mask          bool    [B, N]     optional
+query_coordinates   float32 [B, Q, 3]  optional (GINO output locations)
 point_feature_names string  [F]
 ```
 
@@ -57,6 +58,11 @@ Requirements:
 - For one geometry, use `B = 1`.
 - `point_mask` is only necessary when clouds are padded.
 - Coordinates must use the same centering/scaling used during training.
+- For GINO, source and query coordinates must both be normalized to `[0,1]`
+	on each axis using the same coordinate frame. Geocore supports
+	`normalization="unit_box_01"` for this.
+- `query_coordinates` supplies output locations for source-to-query models
+	such as GINO. When omitted, GINO predicts at the source coordinates.
 - `3 + F` must equal PointNet’s configured `input_dim`.
 - Faces and connectivity are not included.
 
@@ -126,6 +132,6 @@ In summary:
 | Representation file | Primary model | Main required arrays |
 |---|---|---|
 | `mesh_graph.npz` | MeshGraphNet | node features, edges, edge features |
-| `point_cloud.npz` | PointNet | XYZ coordinates |
+| `point_cloud.npz` | PointNet, GINO | XYZ coordinates; optional query coordinates for GINO |
 | `voxel_grid.npz` | FNO3D | dense voxel fields |
 | `parametric_surface.npz` | Deep NURBS | NURBS definition and UV samples |
