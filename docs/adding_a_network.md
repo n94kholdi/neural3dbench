@@ -245,6 +245,25 @@ python examples/train_gat_synthetic.py --num-heads 4
 python examples/train_gcn_synthetic.py --model gcn
 ```
 
+For a geocore end-to-end path, the integration smoke test saves and reloads a
+canonical `MESH_GRAPH`, adapts it with `GraphRepresentationAdapter`, and runs a
+GAT forward/backward pass. Undirected mesh connections retain geocore's two
+directed entries per edge (`sender -> receiver` and `receiver -> sender`):
+
+```bash
+.venv/bin/python neural3dbench/examples/geocore_gat_integration.py
+pytest neural3dbench/tests/test_gat.py neural3dbench/tests/test_geocore_gat_integration.py
+```
+
+The CPU training example learns a synthetic scalar node field and saves the
+graph, checkpoint, and prediction arrays. Preview its target, prediction, and
+absolute error with:
+
+```bash
+.venv/bin/python neural3dbench/examples/train_gat_geocore_field.py
+.venv/bin/python neural3dbench/examples/preview_gat_geocore_field.py
+```
+
 GAT only predicts node fields. Data, physics, and boundary-condition losses
 remain responsibilities of the training system and can consume
 `output.predictions` without changes to this architecture.
