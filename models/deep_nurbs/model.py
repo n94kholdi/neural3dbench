@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from numbers import Integral
-from typing import Sequence
+from typing import Any, Mapping, Sequence
 
 import torch
 from torch import nn
@@ -74,6 +74,41 @@ class DeepNURBSConfig(BaseModelConfig):
     num_hidden_layers: int = 1
     activation: str = "cubic_relu"
     representation: str = "PARAMETRIC_SURFACE"
+
+    @classmethod
+    def from_parametric_surface(
+        cls, data: Mapping[str, Any], **network_overrides: Any
+    ) -> "DeepNURBSConfig":
+        """Build model geometry from a canonical PARAMETRIC_SURFACE mapping."""
+        representation = data.get("representation")
+        if representation is not None and str(representation) != "PARAMETRIC_SURFACE":
+            raise ValueError("Expected a PARAMETRIC_SURFACE payload.")
+        required = (
+            "degree",
+            "knot_vector_u",
+            "knot_vector_v",
+            "control_points",
+            "weights",
+            "admissible_coefficients",
+            "lifting_coefficients",
+        )
+        missing = [name for name in required if name not in data]
+        if missing:
+            raise ValueError(
+                "PARAMETRIC_SURFACE payload is missing: " + ", ".join(missing)
+            )
+        lifting = _finite_tensor(data["lifting_coefficients"], "lifting_coefficients", 3)
+        payload = {
+            "degree": tuple(int(value) for value in data["degree"]),
+            "knot_vectors": (data["knot_vector_u"], data["knot_vector_v"]),
+            "control_points": data["control_points"],
+            "weights": data["weights"],
+            "admissible_coefficients": data["admissible_coefficients"],
+            "lifting_coefficients": lifting,
+            "output_dim": int(lifting.shape[-1]),
+        }
+        payload.update(network_overrides)
+        return cls(**payload)
 
     def __post_init__(self) -> None:
         self.name = "deep_nurbs"

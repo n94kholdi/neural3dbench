@@ -151,6 +151,39 @@ The script saves `model_state_dict` and serialized `config`, reloads both, and
 checks the restored prediction. Visualization uses
 `volumetric.plot_volume_slices` and requires the `viz` optional dependency.
 
+## Geocore voxel-grid integration
+
+The sibling geocore project can produce the canonical interchange file from
+filled geometry rather than merely marking mesh vertices. Its external
+`VOXEL_GRID` representation is converted by `GridRepresentationAdapter` to
+the internal `GRID` name expected by FNO3D; `voxel_fields` remains in
+channel-first `[B,C,D,H,W]` order with `D,H,W = Z,Y,X`.
+
+The smoke integration creates a rounded box, saves and reloads
+`voxel_grid.npz`, validates four channels (`occupancy`, `sdf`, `boundary`, and
+`source`), runs CPU forward/backward passes, and verifies a checkpoint round
+trip:
+
+```bash
+.venv/bin/python neural3dbench/examples/geocore_fno3d_integration.py \
+  --output-dir outputs/fno3d_geocore_smoke
+```
+
+The training example varies spheres, rounded boxes, and heat-source locations
+on a fixed physical domain. It trains FNO3D against a small masked diffusion
+reference operator and saves the canonical interchange input, checkpoint, and
+validation tensors. A companion command renders middle-plane previews:
+
+```bash
+.venv/bin/python neural3dbench/examples/train_fno3d_geocore_heat.py \
+  --device cpu --output-dir outputs/fno3d_geocore_heat
+.venv/bin/python neural3dbench/examples/preview_fno3d_geocore_heat.py \
+  --output-dir outputs/fno3d_geocore_heat
+```
+
+The saved checkpoint records channel order and `normalization_id`; both must
+match at inference. The preview script requires the `viz` optional dependency.
+
 ## Scalability benchmark
 
 Safe CPU defaults benchmark resolutions 16 and 32:

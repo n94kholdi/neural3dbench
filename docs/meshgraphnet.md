@@ -111,6 +111,15 @@ Run the graph-dependent one-step diffusion example with:
 python examples/train_meshgraphnet_synthetic.py --epochs 30
 ```
 
+For an end-to-end example that creates a plate mesh with the sibling geocore
+repository, writes a schema-valid `mesh_graph.npz`, trains a one-step heat
+solver, and evaluates an autoregressive rollout, run from the shared workspace
+root:
+
+```bash
+.venv/bin/python neural3dbench/examples/train_meshgraphnet_geocore_heat.py
+```
+
 The official `cylinder_flow` and `flag_simple` datasets can later be adapted by
 reproducing their task-specific node features, edge construction, normalizers,
 targets, and external rollout/update rules. No external dataset is required by

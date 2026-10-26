@@ -129,7 +129,8 @@ represent PDE trial solutions while strongly imposing homogeneous Dirichlet
 conditions. It also evaluates the configured NURBS surface to map parametric
 coordinates to physical coordinates. The model does not include a PDE loss or
 training loop. See [the Deep NURBS documentation](docs/deep_nurbs.md) for the
-paper, geometry contract, and configuration details.
+paper, geometry contract, configuration details, and the geocore
+`PARAMETRIC_SURFACE` CPU training example.
 
 Run the test suite with:
 

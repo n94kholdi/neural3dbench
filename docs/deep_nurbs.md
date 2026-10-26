@@ -99,3 +99,31 @@ The model guarantees the zero trace of the `phi * NN` term. It does not impose
 PDE constraints, construct an admissible `phi` for a supplied boundary-value
 problem, validate geometric bijectivity, or perform the paper's importance
 sampling. Those tasks belong to problem setup and training code.
+
+## Geocore integration and CPU training
+
+A canonical geocore `PARAMETRIC_SURFACE` file contains both kinds of data the
+model needs: fixed NURBS geometry for its configuration and sampled UV points
+for runtime input. Load and split them explicitly:
+
+```python
+raw = gc.load("parametric_surface.npz")
+config = DeepNURBSConfig.from_parametric_surface(raw, hidden_dim=48)
+model_input = ParametricSurfaceRepresentationAdapter().adapt(raw)
+model = create_model(config)
+prediction = model(model_input).predictions
+```
+
+`examples/geocore_deep_nurbs_integration.py` creates a curved quarter-annulus,
+validates/saves/reloads `parametric_surface.npz`, checks physical coordinates,
+CPU gradients, and checkpoint restoration. The focused training example fits a
+manufactured zero-Dirichlet field and saves metrics and visualization inputs:
+
+```bash
+python examples/train_deep_nurbs_geocore_field.py --device cpu
+python examples/preview_deep_nurbs_geocore_field.py
+pytest tests/test_deep_nurbs.py tests/test_geocore_deep_nurbs_integration.py
+```
+
+The manufactured field is a development check for the representation/model
+boundary, not a comparable PDE benchmark or reproduction of the paper.

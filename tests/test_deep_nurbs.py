@@ -25,6 +25,25 @@ def test_config_factory_and_public_exports():
     assert model.capabilities.representation == "PARAMETRIC_SURFACE"
 
 
+def test_config_can_be_built_from_parametric_surface_mapping():
+    default = DeepNURBSConfig()
+    raw = {
+        "representation": "PARAMETRIC_SURFACE",
+        "degree": default.degree,
+        "knot_vector_u": default.knot_vectors[0],
+        "knot_vector_v": default.knot_vectors[1],
+        "control_points": default.control_points,
+        "weights": default.weights,
+        "admissible_coefficients": default.admissible_coefficients,
+        "lifting_coefficients": default.lifting_coefficients,
+    }
+    adapted = DeepNURBSConfig.from_parametric_surface(raw, hidden_dim=12)
+    assert adapted.hidden_dim == 12
+    assert adapted.control_points == default.control_points
+    with pytest.raises(ValueError, match="missing"):
+        DeepNURBSConfig.from_parametric_surface({"representation": "PARAMETRIC_SURFACE"})
+
+
 def test_forward_contract_surface_and_boundary_values():
     model = create_model("deep_nurbs", hidden_dim=8).eval()
     output = model(_input())

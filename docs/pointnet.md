@@ -91,6 +91,26 @@ and scalar or vector fields (vectors are colored by magnitude).
 Run PointNet tests alone with `pytest tests/test_pointnet.py`, or use `pytest`
 for the full compatibility suite.
 
+## Geocore integration
+
+The sibling geocore project can create, validate, and save the canonical
+`POINT_CLOUD` representation from `models/ModelInput.md`. The end-to-end smoke
+test also verifies optional surface-normal features and a PointNet backward
+pass:
+
+```bash
+.venv/bin/python neural3dbench/examples/geocore_pointnet_integration.py
+```
+
+The training example classifies geocore-generated sphere, box, and cylinder
+surface clouds. It saves `point_cloud.npz`, a model checkpoint, validation
+predictions, and non-interactive PNG previews:
+
+```bash
+.venv/bin/python neural3dbench/examples/train_pointnet_geocore_shapes.py
+.venv/bin/python neural3dbench/examples/preview_pointnet_geocore_shapes.py
+```
+
 ## Limitation
 
 PointNet processes points independently before global aggregation. It therefore

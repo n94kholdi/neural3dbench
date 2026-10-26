@@ -75,6 +75,32 @@ class PointCloudRepresentationAdapter(RepresentationAdapter):
         )
 
 
+class ParametricSurfaceRepresentationAdapter(RepresentationAdapter):
+    """Adapt canonical ``PARAMETRIC_SURFACE`` samples to ``ModelInput``.
+
+    The NURBS definition belongs in :class:`DeepNURBSConfig`; only sampled
+    parametric coordinates are runtime model input.
+    """
+
+    def adapt(self, raw_data: Any, **kwargs) -> ModelInput:
+        if isinstance(raw_data, Mapping):
+            payload = dict(raw_data)
+        else:
+            payload = {"parametric_coordinates": raw_data}
+
+        representation = payload.get("representation")
+        if representation is not None and str(representation) != "PARAMETRIC_SURFACE":
+            raise ValueError("Expected a PARAMETRIC_SURFACE payload.")
+        return ModelInput(
+            coordinates=payload.get(
+                "parametric_coordinates", payload.get("coordinates")
+            ),
+            metadata=payload.get("metadata", {}),
+            representation="PARAMETRIC_SURFACE",
+            **kwargs,
+        )
+
+
 class GridRepresentationAdapter(RepresentationAdapter):
     def adapt(self, raw_data: Any, **kwargs) -> ModelInput:
         if isinstance(raw_data, Mapping):

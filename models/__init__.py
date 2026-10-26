@@ -14,6 +14,7 @@ from .representations import (
     CoordinateRepresentationAdapter,
     GraphRepresentationAdapter,
     GridRepresentationAdapter,
+    ParametricSurfaceRepresentationAdapter,
     PointCloudRepresentationAdapter,
     RepresentationAdapter,
 )
@@ -35,6 +36,7 @@ __all__ = [
     "GCNConfig",
     "GraphRepresentationAdapter",
     "GridRepresentationAdapter",
+    "ParametricSurfaceRepresentationAdapter",
     "PointCloudRepresentationAdapter",
     "ModelCapabilities",
     "ModelInput",
