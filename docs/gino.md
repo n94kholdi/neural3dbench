@@ -87,6 +87,31 @@ inputs = ModelInput(
 predictions = model(inputs).predictions  # [2, 64, 1]
 ```
 
+## Geocore integration and sample training
+
+The geocore integration writes and reloads a canonical `POINT_CLOUD` file with
+source features and separate query coordinates, then checks GINO inference and
+gradients:
+
+```bash
+.venv/bin/python neural3dbench/examples/geocore_gino_integration.py
+pytest -q neural3dbench/tests/test_gino.py neural3dbench/tests/test_geocore_gino_integration.py
+```
+
+The sample training workflow uses geocore to sample solid geometries, assigns
+analytic Gaussian source fields, trains GINO to predict those fields at
+separate query points, and saves a checkpoint plus validation arrays:
+
+```bash
+.venv/bin/python neural3dbench/examples/train_gino_geocore_field.py
+.venv/bin/python neural3dbench/examples/preview_gino_geocore_field.py
+```
+
+The preview compares source values, query targets, predictions, and absolute
+error. This is an integration and regression example, not a validated physical
+solver. GINO requires both source and query coordinates to use the same
+`[0,1]` normalization; the example uses geocore's `unit_box_01` normalization.
+
 The current implementation uses fixed cubic latent grids and compact-support
 radial kernels; it does not model signed-distance fields or impose physical
 boundary conditions. Kernel integration uses chunked pairwise distance
