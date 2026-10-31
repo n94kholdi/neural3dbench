@@ -132,17 +132,21 @@ def query_ball_point(
 class SharedPointMLP2d(nn.Module):
     """Shared MLP over every point in every local neighborhood."""
 
-    def __init__(self, channels: Sequence[int]):
+    def __init__(self, channels: Sequence[int], *, normalization: str = "batch"):
         super().__init__()
         layers: list[nn.Module] = []
         for input_channels, output_channels in zip(channels[:-1], channels[1:]):
-            layers.extend(
-                (
-                    nn.Conv2d(input_channels, output_channels, 1, bias=False),
-                    nn.BatchNorm2d(output_channels),
-                    nn.ReLU(inplace=True),
+            layers.append(
+                nn.Conv2d(
+                    input_channels,
+                    output_channels,
+                    1,
+                    bias=normalization == "none",
                 )
             )
+            if normalization == "batch":
+                layers.append(nn.BatchNorm2d(output_channels))
+            layers.append(nn.ReLU(inplace=True))
         self.layers = nn.Sequential(*layers)
 
     def forward(self, features: torch.Tensor) -> torch.Tensor:
@@ -159,13 +163,17 @@ class SetAbstraction(nn.Module):
         neighbor_count: int | None,
         feature_channels: int,
         mlp_channels: Sequence[int],
+        *,
+        normalization: str = "batch",
     ):
         super().__init__()
         self.sample_count = sample_count
         self.radius = radius
         self.neighbor_count = neighbor_count
         self.group_all = sample_count is None
-        self.mlp = SharedPointMLP2d((feature_channels + 3, *mlp_channels))
+        self.mlp = SharedPointMLP2d(
+            (feature_channels + 3, *mlp_channels), normalization=normalization
+        )
 
     def forward(
         self,
@@ -223,11 +231,19 @@ class SetAbstraction(nn.Module):
 class FeaturePropagation(nn.Module):
     """Three-neighbor interpolation followed by a shared point MLP."""
 
-    def __init__(self, input_channels: int, mlp_channels: Sequence[int]):
+    def __init__(
+        self,
+        input_channels: int,
+        mlp_channels: Sequence[int],
+        *,
+        normalization: str = "batch",
+    ):
         super().__init__()
         from models.pointnet.components import SharedPointMLP
 
-        self.mlp = SharedPointMLP((input_channels, *mlp_channels))
+        self.mlp = SharedPointMLP(
+            (input_channels, *mlp_channels), normalization=normalization
+        )
 
     def forward(
         self,
@@ -268,11 +284,18 @@ class PointNet2Encoder(nn.Module):
         neighbor_counts: Sequence[int],
         abstraction_channels: Sequence[Sequence[int]],
         global_dim: int,
+        *,
+        normalization: str = "batch",
     ):
         super().__init__()
         first_channels, second_channels = abstraction_channels
         self.sa1 = SetAbstraction(
-            sample_counts[0], radii[0], neighbor_counts[0], feature_dim, first_channels
+            sample_counts[0],
+            radii[0],
+            neighbor_counts[0],
+            feature_dim,
+            first_channels,
+            normalization=normalization,
         )
         self.sa2 = SetAbstraction(
             sample_counts[1],
@@ -280,9 +303,15 @@ class PointNet2Encoder(nn.Module):
             neighbor_counts[1],
             first_channels[-1],
             second_channels,
+            normalization=normalization,
         )
         self.sa3 = SetAbstraction(
-            None, None, None, second_channels[-1], (256, 512, global_dim)
+            None,
+            None,
+            None,
+            second_channels[-1],
+            (256, 512, global_dim),
+            normalization=normalization,
         )
 
     def forward(
@@ -323,11 +352,19 @@ class PointNet2SegmentationHead(nn.Module):
         global_dim: int,
         output_dim: int,
         dropout: float,
+        *,
+        normalization: str = "batch",
     ):
         super().__init__()
-        self.fp3 = FeaturePropagation(level2_dim + global_dim, (256, 256))
-        self.fp2 = FeaturePropagation(level1_dim + 256, (256, 128))
-        self.fp1 = FeaturePropagation(input_dim + 128, (128, 128, 128))
+        self.fp3 = FeaturePropagation(
+            level2_dim + global_dim, (256, 256), normalization=normalization
+        )
+        self.fp2 = FeaturePropagation(
+            level1_dim + 256, (256, 128), normalization=normalization
+        )
+        self.fp1 = FeaturePropagation(
+            input_dim + 128, (128, 128, 128), normalization=normalization
+        )
         self.dropout = nn.Dropout(dropout)
         self.output = nn.Conv1d(128, output_dim, 1)
 

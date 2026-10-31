@@ -13,7 +13,13 @@ from models.pointnet2 import (
 from pointcloud import PointCloudSample, collate_point_clouds
 
 
-def _config(task: str, *, input_dim: int = 3, output_dim: int = 4):
+def _config(
+    task: str,
+    *,
+    input_dim: int = 3,
+    output_dim: int = 4,
+    normalization: str = "batch",
+):
     return PointNet2Config(
         input_dim=input_dim,
         output_dim=output_dim,
@@ -24,6 +30,7 @@ def _config(task: str, *, input_dim: int = 3, output_dim: int = 4):
         abstraction_channels=((16, 32), (32, 64)),
         global_dim=64,
         dropout=0.0,
+        normalization=normalization,
     )
 
 
@@ -42,6 +49,18 @@ def test_pointnet2_registry_config_and_alias():
     assert ModelRegistry.get("pointnet2") is PointNet2
     assert ModelRegistry.get("pointnet++") is PointNet2
     assert model.capabilities.variable_node_count
+
+
+def test_batch_normalization_can_be_disabled():
+    model = PointNet2(
+        _config("classification", output_dim=3, normalization="none")
+    )
+    assert not any(
+        isinstance(module, torch.nn.modules.batchnorm._BatchNorm)
+        for module in model.modules()
+    )
+    output = model(ModelInput(coordinates=torch.randn(1, 16, 3)))
+    assert output.predictions.shape == (1, 3)
 
 
 def test_sampling_and_radius_grouping_respect_masks():
@@ -147,6 +166,8 @@ def test_state_dict_serialization_round_trip():
 def test_invalid_config_and_inputs_are_rejected():
     with pytest.raises(ValueError, match="exactly two"):
         PointNet2Config(sample_counts=(8,))
+    with pytest.raises(ValueError, match="normalization"):
+        PointNet2Config(normalization="layer")
     model = _model("classification", input_dim=5)
     with pytest.raises(ValueError, match="additional point features"):
         model(ModelInput(coordinates=torch.randn(2, 8, 3)))

@@ -26,6 +26,7 @@ class PointNetConfig(BaseModelConfig):
     dropout: float = 0.3
     input_transform: bool = True
     feature_transform: bool = True
+    normalization: str = "batch"
     representation: str = "POINT_CLOUD"
 
     def __post_init__(self) -> None:
@@ -33,6 +34,7 @@ class PointNetConfig(BaseModelConfig):
         self.model_type = "pointnet"
         self.representation = "POINT_CLOUD"
         self.task = self.task.lower()
+        self.normalization = self.normalization.lower()
         if self.input_dim < 3:
             raise ValueError("input_dim must include at least XYZ coordinates (3 channels).")
         if self.output_dim <= 0:
@@ -41,6 +43,8 @@ class PointNetConfig(BaseModelConfig):
             raise ValueError("global_dim must be positive.")
         if self.task not in {"classification", "segmentation"}:
             raise ValueError("task must be 'classification' or 'segmentation'.")
+        if self.normalization not in {"batch", "none"}:
+            raise ValueError("normalization must be batch or none.")
         if not 0.0 <= self.dropout < 1.0:
             raise ValueError("dropout must be in the range [0, 1).")
 
@@ -61,14 +65,21 @@ class PointNet(BaseNetwork):
             self.config.global_dim,
             input_transform=self.config.input_transform,
             feature_transform=self.config.feature_transform,
+            normalization=self.config.normalization,
         )
         if self.config.task == "classification":
             self.head = PointNetClassificationHead(
-                self.config.global_dim, self.config.output_dim, self.config.dropout
+                self.config.global_dim,
+                self.config.output_dim,
+                self.config.dropout,
+                normalization=self.config.normalization,
             )
         else:
             self.head = PointNetSegmentationHead(
-                self.config.global_dim, self.config.output_dim, self.config.dropout
+                self.config.global_dim,
+                self.config.output_dim,
+                self.config.dropout,
+                normalization=self.config.normalization,
             )
 
     @property

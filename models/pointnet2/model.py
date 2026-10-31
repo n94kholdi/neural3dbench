@@ -28,6 +28,7 @@ class PointNet2Config(BaseModelConfig):
     )
     global_dim: int = 1024
     dropout: float = 0.3
+    normalization: str = "batch"
     representation: str = "POINT_CLOUD"
 
     def __post_init__(self) -> None:
@@ -35,6 +36,7 @@ class PointNet2Config(BaseModelConfig):
         self.model_type = "pointnet2"
         self.representation = "POINT_CLOUD"
         self.task = self.task.lower()
+        self.normalization = self.normalization.lower()
         self.sample_counts = tuple(self.sample_counts)
         self.radii = tuple(self.radii)
         self.neighbor_counts = tuple(self.neighbor_counts)
@@ -47,6 +49,8 @@ class PointNet2Config(BaseModelConfig):
             raise ValueError("output_dim and global_dim must be positive.")
         if self.task not in {"classification", "segmentation"}:
             raise ValueError("task must be 'classification' or 'segmentation'.")
+        if self.normalization not in {"batch", "none"}:
+            raise ValueError("normalization must be batch or none.")
         if not 0.0 <= self.dropout < 1.0:
             raise ValueError("dropout must be in the range [0, 1).")
         for name, values in (
@@ -86,10 +90,14 @@ class PointNet2(BaseNetwork):
             self.config.neighbor_counts,
             self.config.abstraction_channels,
             self.config.global_dim,
+            normalization=self.config.normalization,
         )
         if self.config.task == "classification":
             self.head = PointNetClassificationHead(
-                self.config.global_dim, self.config.output_dim, self.config.dropout
+                self.config.global_dim,
+                self.config.output_dim,
+                self.config.dropout,
+                normalization=self.config.normalization,
             )
         else:
             self.head = PointNet2SegmentationHead(
@@ -99,6 +107,7 @@ class PointNet2(BaseNetwork):
                 self.config.global_dim,
                 self.config.output_dim,
                 self.config.dropout,
+                normalization=self.config.normalization,
             )
 
     @property

@@ -46,6 +46,7 @@ model = create_model({
     "input_dim": 3,
     "output_dim": 3,
     "task": "classification",
+    "normalization": "none",  # "batch" (default) or "none"
 })
 logits = model(ModelInput(coordinates=points)).predictions
 ```
@@ -69,7 +70,9 @@ field = model(ModelInput(
 
 Configuration options are `input_dim` (XYZ plus feature channels), `output_dim`,
 `task`, `global_dim` (default 1024), `dropout`, `input_transform`, and
-`feature_transform`. Learned transforms are returned in `output.auxiliary`.
+`feature_transform`. Set `normalization="none"` to remove BatchNorm from the
+transforms, shared MLPs, and prediction head; `"batch"` remains the default.
+Learned transforms are returned in `output.auxiliary`.
 `feature_transform_regularizer` implements the paper's optional orthogonality
 penalty for a training objective.
 

@@ -53,6 +53,24 @@ def test_pointnet_config_and_registry():
     assert model.capabilities.variable_node_count
 
 
+def test_batch_normalization_can_be_disabled():
+    model = PointNet(
+        PointNetConfig(
+            task="classification",
+            output_dim=3,
+            global_dim=128,
+            dropout=0.0,
+            normalization="none",
+        )
+    )
+    assert not any(
+        isinstance(module, torch.nn.modules.batchnorm._BatchNorm)
+        for module in model.modules()
+    )
+    output = model(ModelInput(coordinates=torch.randn(1, 12, 3)))
+    assert output.predictions.shape == (1, 3)
+
+
 def test_point_cloud_representation_adapter_preserves_xyz_and_features():
     points = torch.randn(2, 9, 3)
     features = torch.randn(2, 9, 2)
@@ -182,6 +200,8 @@ def test_feature_transform_regularizer():
 
 
 def test_invalid_pointnet_inputs_are_rejected():
+    with pytest.raises(ValueError, match="normalization"):
+        PointNetConfig(normalization="layer")
     model = _model("classification", input_dim=5)
     with pytest.raises(ValueError, match="additional point features"):
         model(ModelInput(coordinates=torch.randn(2, 8, 3)))

@@ -31,16 +31,31 @@ def masked_max(features: torch.Tensor, mask: torch.Tensor | None) -> torch.Tenso
 class SharedPointMLP(nn.Module):
     """A sequence of 1x1 convolutions shared by every point."""
 
-    def __init__(self, channels: Sequence[int], *, final_activation: bool = True):
+    def __init__(
+        self,
+        channels: Sequence[int],
+        *,
+        final_activation: bool = True,
+        normalization: str = "batch",
+    ):
         super().__init__()
         layers: list[nn.Module] = []
         for index, (in_channels, out_channels) in enumerate(
             zip(channels[:-1], channels[1:])
         ):
             is_last = index == len(channels) - 2
-            layers.append(nn.Conv1d(in_channels, out_channels, kernel_size=1, bias=False))
+            layers.append(
+                nn.Conv1d(
+                    in_channels,
+                    out_channels,
+                    kernel_size=1,
+                    bias=normalization == "none",
+                )
+            )
             if final_activation or not is_last:
-                layers.extend((nn.BatchNorm1d(out_channels), nn.ReLU(inplace=True)))
+                if normalization == "batch":
+                    layers.append(nn.BatchNorm1d(out_channels))
+                layers.append(nn.ReLU(inplace=True))
         self.layers = nn.Sequential(*layers)
 
     def forward(self, features: torch.Tensor) -> torch.Tensor:
@@ -50,14 +65,16 @@ class SharedPointMLP(nn.Module):
 class TransformNet(nn.Module):
     """PointNet T-Net predicting a data-dependent square transformation."""
 
-    def __init__(self, feature_dim: int):
+    def __init__(self, feature_dim: int, *, normalization: str = "batch"):
         super().__init__()
         self.feature_dim = feature_dim
-        self.point_mlp = SharedPointMLP((feature_dim, 64, 128, 1024))
-        self.fc1 = nn.Linear(1024, 512, bias=False)
-        self.bn1 = nn.BatchNorm1d(512)
-        self.fc2 = nn.Linear(512, 256, bias=False)
-        self.bn2 = nn.BatchNorm1d(256)
+        self.point_mlp = SharedPointMLP(
+            (feature_dim, 64, 128, 1024), normalization=normalization
+        )
+        self.fc1 = nn.Linear(1024, 512, bias=normalization == "none")
+        self.bn1 = nn.BatchNorm1d(512) if normalization == "batch" else nn.Identity()
+        self.fc2 = nn.Linear(512, 256, bias=normalization == "none")
+        self.bn2 = nn.BatchNorm1d(256) if normalization == "batch" else nn.Identity()
         self.fc3 = nn.Linear(256, feature_dim * feature_dim)
         self.activation = nn.ReLU(inplace=True)
 
@@ -88,12 +105,21 @@ class PointNetEncoder(nn.Module):
         *,
         input_transform: bool = True,
         feature_transform: bool = True,
+        normalization: str = "batch",
     ):
         super().__init__()
-        self.input_transform = TransformNet(3) if input_transform else None
-        self.first_mlp = SharedPointMLP((input_dim, 64, 64))
-        self.feature_transform = TransformNet(64) if feature_transform else None
-        self.second_mlp = SharedPointMLP((64, 64, 128, global_dim))
+        self.input_transform = (
+            TransformNet(3, normalization=normalization) if input_transform else None
+        )
+        self.first_mlp = SharedPointMLP(
+            (input_dim, 64, 64), normalization=normalization
+        )
+        self.feature_transform = (
+            TransformNet(64, normalization=normalization) if feature_transform else None
+        )
+        self.second_mlp = SharedPointMLP(
+            (64, 64, 128, global_dim), normalization=normalization
+        )
 
     def forward(
         self,
@@ -126,28 +152,51 @@ class PointNetEncoder(nn.Module):
 
 
 class PointNetClassificationHead(nn.Module):
-    def __init__(self, global_dim: int, output_dim: int, dropout: float):
+    def __init__(
+        self,
+        global_dim: int,
+        output_dim: int,
+        dropout: float,
+        *,
+        normalization: str = "batch",
+    ):
         super().__init__()
-        self.layers = nn.Sequential(
-            nn.Linear(global_dim, 512, bias=False),
-            nn.BatchNorm1d(512),
-            nn.ReLU(inplace=True),
-            nn.Dropout(dropout),
-            nn.Linear(512, 256, bias=False),
-            nn.BatchNorm1d(256),
-            nn.ReLU(inplace=True),
-            nn.Dropout(dropout),
-            nn.Linear(256, output_dim),
+        layers: list[nn.Module] = [
+            nn.Linear(global_dim, 512, bias=normalization == "none")
+        ]
+        if normalization == "batch":
+            layers.append(nn.BatchNorm1d(512))
+        layers.extend(
+            (
+                nn.ReLU(inplace=True),
+                nn.Dropout(dropout),
+                nn.Linear(512, 256, bias=normalization == "none"),
+            )
         )
+        if normalization == "batch":
+            layers.append(nn.BatchNorm1d(256))
+        layers.extend(
+            (nn.ReLU(inplace=True), nn.Dropout(dropout), nn.Linear(256, output_dim))
+        )
+        self.layers = nn.Sequential(*layers)
 
     def forward(self, global_feature: torch.Tensor) -> torch.Tensor:
         return self.layers(global_feature)
 
 
 class PointNetSegmentationHead(nn.Module):
-    def __init__(self, global_dim: int, output_dim: int, dropout: float):
+    def __init__(
+        self,
+        global_dim: int,
+        output_dim: int,
+        dropout: float,
+        *,
+        normalization: str = "batch",
+    ):
         super().__init__()
-        self.point_mlp = SharedPointMLP((global_dim + 64, 512, 256, 128))
+        self.point_mlp = SharedPointMLP(
+            (global_dim + 64, 512, 256, 128), normalization=normalization
+        )
         self.dropout = nn.Dropout(dropout)
         self.output = nn.Conv1d(128, output_dim, kernel_size=1)
 

@@ -49,8 +49,13 @@ model = create_model({
     ],
     "global_dim": 1024,
     "dropout": 0.3,
+    "normalization": "none",  # "batch" (default) or "none"
 })
 ```
+
+Set `normalization="none"` to remove BatchNorm from every set-abstraction,
+feature-propagation, and prediction-head MLP. The default remains `"batch"` for
+compatibility with existing configurations and checkpoints.
 
 Input and output formats match PointNet:
 
