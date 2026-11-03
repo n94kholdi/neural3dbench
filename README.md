@@ -22,6 +22,7 @@ benchmarking neural networks for 3D geometry and physics simulations.
 | Fourier Neural Operator (FNO3D) | Structured 3D grid | Implemented |
 | Transolver | Irregular points / mesh nodes | Implemented |
 | SIREN | Continuous coordinates / irregular points | Implemented |
+| MLP | Continuous coordinates / irregular points | Implemented |
 | Deep NURBS | NURBS parameterized 2D domains | Implemented |
 
 ## Installation
@@ -121,8 +122,14 @@ SIREN represents a continuous field with a coordinate-to-value sine network.
 It evaluates irregular points independently, supports coordinate derivatives,
 and can serve as the function approximator in physics-informed training; it is
 not itself a PINN or a neural operator. See [the SIREN documentation](docs/siren.md)
-for initialization, tensor contracts, derivatives, masking, and the synthetic
-3D field example.
+for initialization, tensor contracts, derivatives, masking, optional coordinate
+scaling, frequency settings, and the synthetic 3D field example.
+
+MLP is the standard pointwise coordinate baseline with `tanh`, `silu`, `relu`,
+or `gelu` activations, configurable widths, optional point features, and
+optional residual connections. It shares SIREN's input contract, so it can
+replace SIREN in coordinate-based training loops. See
+[the MLP documentation](docs/mlp.md).
 
 Deep NURBS combines a NURBS admissible field with a shallow coordinate MLP to
 represent PDE trial solutions while strongly imposing homogeneous Dirichlet

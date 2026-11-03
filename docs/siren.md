@@ -123,10 +123,10 @@ model = create_model({
 
 ## Coordinates, frequency, and derivatives
 
-Normalize coordinates in the data pipeline, commonly to `[-1, 1]`. SIREN does
-not normalize coordinates, features, or targets internally. A coordinate
-rescaling changes the effective represented frequencies, so `first_omega_0`
-must be interpreted together with the coordinate domain. Physical field
+Normalize coordinates in the data pipeline, commonly to `[-1, 1]`. By default
+SIREN does not normalize coordinates, features, or targets internally. A
+coordinate rescaling changes the effective represented frequencies, so
+`first_omega_0` must be interpreted together with the coordinate domain. Physical field
 normalization and denormalization also stay outside the model.
 
 The forward path preserves the caller's coordinate autograd graph and does not
@@ -142,6 +142,50 @@ laplacian_x = torch.autograd.grad(
     gradient[..., 0].sum(), coordinates, create_graph=True
 )[0][..., 0]
 ```
+
+### Optional coordinate scaling
+
+Coordinate scaling is opt-in. It is applied only to coordinates, before they
+are concatenated with optional point features, as
+`(coordinates - coordinate_center) * coordinate_scale`:
+
+```python
+config = SIRENConfig(
+    spatial_dim=3,
+    coordinate_center=(0.0, 0.0, 0.0),
+    coordinate_scale=(1.0, 2.0, 2.0),
+)
+```
+
+This maps the box `[-1, 1] x [-0.5, 0.5] x [-0.5, 0.5]` to `[-1, 1]^3`. In
+general, for bounds `lower` and `upper`, use
+`coordinate_center=(lower + upper) / 2` and
+`coordinate_scale=2 / (upper - lower)`. Both settings default to `None`, and
+omitting them produces exactly the previous computation. They add no
+parameters or persistent buffers, so existing state dictionaries load strictly
+in scaled and unscaled models. Derivatives are taken with respect to the raw
+coordinates passed in `ModelInput.coordinates`.
+
+### Choosing frequencies
+
+- Start with `first_omega_0=30` and `hidden_omega_0=30` for coordinates scaled
+  to roughly `[-1, 1]` and fields with substantial high-frequency content.
+- For smooth PDE solutions, start lower, around `10` to `15`.
+- Treat coordinate scale and first-layer frequency as a pair: multiplying an
+  axis by `s` also multiplies its effective first-layer frequency by `s`.
+  Normalize strongly anisotropic domains before increasing `first_omega_0`.
+- If high-order derivatives or their parameter gradients become excessively
+  large, reduce the coordinate scale or frequencies. Validate the highest
+  derivative order used by the PDE, not only prediction loss.
+
+The hidden frequency need not equal the first frequency. Frequency selection
+is problem-dependent, so compare accuracy and PDE residual with fixed seeds and
+collocation points. In a parameter-matched 3D steady-heat comparison
+(PINN-engine `examples/steady_heat_3d/benchmark.py`), SIREN with
+`omega_0=12` and raw coordinates halved the tanh MLP's error and lowered the
+PDE residual about 25x, but trained about 3.7x slower. Scaling coordinates
+while keeping `omega_0=12` made accuracy much worse; reduce `first_omega_0`
+when enabling scaling.
 
 PDE residuals, boundary losses, sample selection, and derivative combinations
 belong in the training loop. A PINN is a physics-informed training formulation;
@@ -178,7 +222,7 @@ checkpoint containing `model_state_dict` and `config`. Loading uses
   governing equations and constraints.
 
 The core model deliberately omits graph edges, voxelization, convolutions,
-attention, Fourier features, normalization layers, residual connections,
+attention, Fourier features, learned normalization layers, residual connections,
 dropout, latent modulation, and built-in PDE behavior. Unlike the official
 meta-learning code, it uses ordinary `nn.Linear` modules and the repository's
 `ModelInput`/`ModelOutput` interface; official state dictionaries are therefore

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 import math
 
 import pytest
@@ -280,3 +281,96 @@ def test_cuda_forward_backward():
     ).predictions
     output.square().mean().backward()
     assert output.is_cuda and torch.isfinite(output).all()
+
+
+def test_coordinate_transform_is_optional_and_checkpoint_compatible():
+    torch.manual_seed(7)
+    default = SIREN(_config(spatial_dim=2, hidden_dim=8, num_hidden_layers=1))
+    torch.manual_seed(7)
+    explicit = SIREN(
+        _config(
+            spatial_dim=2,
+            hidden_dim=8,
+            num_hidden_layers=1,
+            coordinate_center=None,
+            coordinate_scale=None,
+        )
+    )
+    assert default.state_dict().keys() == explicit.state_dict().keys()
+    points = torch.rand(1, 5, 2)
+    torch.testing.assert_close(
+        default(ModelInput(coordinates=points)).predictions,
+        explicit(ModelInput(coordinates=points)).predictions,
+        rtol=0,
+        atol=0,
+    )
+
+    transformed = SIREN(
+        _config(
+            spatial_dim=2,
+            hidden_dim=8,
+            num_hidden_layers=1,
+            coordinate_center=(1.0, -2.0),
+            coordinate_scale=(0.5, 4.0),
+        )
+    )
+    transformed.load_state_dict(default.state_dict(), strict=True)
+    raw = torch.tensor([[[3.0, -1.5], [1.0, -2.0]]])
+    normalized = (raw - torch.tensor([1.0, -2.0])) * torch.tensor([0.5, 4.0])
+    torch.testing.assert_close(
+        transformed(ModelInput(coordinates=raw)).predictions,
+        default(ModelInput(coordinates=normalized)).predictions,
+    )
+
+
+def test_config_coordinate_transform_json_round_trip():
+    config = _config(
+        spatial_dim=2,
+        coordinate_center=(2.0, -3.0),
+        coordinate_scale=(0.25, 2.0),
+    )
+    restored = SIRENConfig.from_dict(json.loads(json.dumps(config.to_dict())))
+    assert restored == config
+    assert restored.coordinate_center == (2.0, -3.0)
+    assert restored.coordinate_scale == (0.25, 2.0)
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    (
+        {"coordinate_center": (0.0,)},
+        {"coordinate_center": (0.0, float("inf"))},
+        {"coordinate_scale": (1.0,)},
+        {"coordinate_scale": (1.0, 0.0)},
+        {"coordinate_scale": (1.0, float("nan"))},
+    ),
+)
+def test_config_rejects_invalid_coordinate_transforms(overrides):
+    with pytest.raises(ValueError):
+        SIRENConfig(spatial_dim=2, **overrides)
+
+
+def test_scaled_higher_derivatives_and_parameter_gradients_are_finite():
+    model = SIREN(
+        _config(
+            spatial_dim=2,
+            hidden_dim=12,
+            num_hidden_layers=2,
+            first_omega_0=12.0,
+            hidden_omega_0=12.0,
+            coordinate_center=(0.5, -1.0),
+            coordinate_scale=(0.5, 2.0),
+        )
+    ).double()
+    coordinates = torch.rand(2, 4, 2, dtype=torch.double, requires_grad=True)
+    field = model(ModelInput(coordinates=coordinates)).predictions[..., 0]
+    first = torch.autograd.grad(field.sum(), coordinates, create_graph=True)[0]
+    second = torch.autograd.grad(first[..., 0].sum(), coordinates, create_graph=True)[0]
+    third = torch.autograd.grad(second[..., 0].sum(), coordinates, create_graph=True)[0]
+    assert all(torch.isfinite(t).all() for t in (field, first, second, third))
+    loss = field.square().mean() + third.square().mean()
+    loss.backward()
+    gradients = [
+        parameter.grad for parameter in model.parameters() if parameter.grad is not None
+    ]
+    assert gradients and all(torch.isfinite(gradient).all() for gradient in gradients)

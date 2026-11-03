@@ -23,6 +23,8 @@ class SIRENConfig(BaseModelConfig):
     first_omega_0: float = 30.0
     hidden_omega_0: float = 30.0
     outermost_linear: bool = True
+    coordinate_center: tuple[float, ...] | None = None
+    coordinate_scale: tuple[float, ...] | None = None
     representation: str = "POINT_CLOUD"
 
     def __post_init__(self) -> None:
@@ -42,6 +44,32 @@ class SIRENConfig(BaseModelConfig):
                 raise ValueError(f"{field_name} must be a positive finite value.")
         if not isinstance(self.outermost_linear, bool):
             raise TypeError("outermost_linear must be boolean.")
+        self.coordinate_center = self._coordinate_transform(
+            "coordinate_center", self.coordinate_center, positive=False
+        )
+        self.coordinate_scale = self._coordinate_transform(
+            "coordinate_scale", self.coordinate_scale, positive=True
+        )
+
+    def _coordinate_transform(self, name, values, *, positive):
+        if values is None:
+            return None
+        try:
+            values = tuple(values)
+        except TypeError as exc:
+            raise ValueError(f"{name} must contain {self.spatial_dim} values.") from exc
+        if len(values) != self.spatial_dim:
+            raise ValueError(f"{name} must contain {self.spatial_dim} values.")
+        if any(
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or (positive and value <= 0)
+            for value in values
+        ):
+            requirement = "positive finite" if positive else "finite"
+            raise ValueError(f"{name} values must be {requirement} numbers.")
+        return tuple(float(value) for value in values)
 
 
 class SIREN(BaseNetwork):
@@ -138,12 +166,19 @@ class SIREN(BaseNetwork):
         coordinates = torch.as_tensor(
             inputs.coordinates, device=parameter.device, dtype=parameter.dtype
         )
-        x = coordinates
+        scaled_coordinates = coordinates
+        if self.config.coordinate_center is not None:
+            center = coordinates.new_tensor(self.config.coordinate_center)
+            scaled_coordinates = scaled_coordinates - center
+        if self.config.coordinate_scale is not None:
+            scale = coordinates.new_tensor(self.config.coordinate_scale)
+            scaled_coordinates = scaled_coordinates * scale
+        x = scaled_coordinates
         if self.config.input_dim > 0:
             features = torch.as_tensor(
                 inputs.point_features, device=parameter.device, dtype=parameter.dtype
             )
-            x = torch.cat((coordinates, features), dim=-1)
+            x = torch.cat((scaled_coordinates, features), dim=-1)
 
         x = self.first_layer(x)
         for layer in self.hidden_layers:

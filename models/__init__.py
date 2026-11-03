@@ -4,6 +4,7 @@ from .deep_nurbs import DeepNURBS, DeepNURBSConfig
 from .fno import FNO3D, FNO3DConfig, SpectralConv3d
 from .gino import GINO, GINOConfig
 from .graph import GAT, GATConfig, GCN, GCNConfig, MeshGraphNet, MeshGraphNetConfig
+from .mlp import MLP, MLPConfig
 from .pointnet import PointNet, PointNetConfig
 from .pointnet2 import PointNet2, PointNet2Config
 from .siren import SineLayer, SIREN, SIRENConfig
@@ -44,6 +45,8 @@ __all__ = [
     "ModelRegistry",
     "MeshGraphNet",
     "MeshGraphNetConfig",
+    "MLP",
+    "MLPConfig",
     "PointNet",
     "PointNetConfig",
     "PointNet2",
