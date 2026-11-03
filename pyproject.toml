@@ -29,6 +29,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+advisor = [
+  "mcp>=1.2.0",
+  "pyyaml>=6.0",
+]
 dev = [
   "pytest>=8.0.0",
 ]
@@ -42,7 +46,7 @@ viz = [
 
 [tool.setuptools.packages.find]
 include = ["mesh*", "models*", "pointcloud*", "simulation*", "volumetric*"]
-exclude = ["checkpoints*", "docs*", "examples*", "tests*"]
+exclude = ["checkpoints*", "docs*", "examples*", "tests*", "tools*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

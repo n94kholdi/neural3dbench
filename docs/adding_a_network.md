@@ -109,6 +109,11 @@ When adding a model, include tests for:
 
 The repository contains a small infrastructure test suite covering these conditions.
 
+Also add an entry to `tools/mcp_advisor/catalog.yaml` (complexity, memory model,
+merits, demerits) and document the model in `docs/<model_name>.md`.
+`tests/test_advisor_mcp.py` fails while a registered model has no catalog entry;
+see [tools/mcp_advisor/README.md](../tools/mcp_advisor/README.md).
+
 ## 9. Example: Graph Convolutional Network (GCN)
 
 The project includes a graph package for architectures that operate on node features and connectivity, with the shared graph validation logic living in `models/graph/base.py` and the model-specific implementation in `models/graph/gcn.py`.
