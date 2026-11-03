@@ -3,7 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 import sys
 
-import numpy as np
+import pytest
+
+np = pytest.importorskip("numpy")
 import torch
 
 
@@ -15,7 +17,7 @@ for source_root in (EXAMPLES_ROOT, GEOCORE_ROOT):
     if source not in sys.path:
         sys.path.insert(0, source)
 
-import geocore as gc  # noqa: E402
+gc = pytest.importorskip("geocore", reason="requires sibling geometry-py/geocore checkout")
 from geocore_gat_integration import (  # noqa: E402
     adapt_graph,
     assert_bidirectional,

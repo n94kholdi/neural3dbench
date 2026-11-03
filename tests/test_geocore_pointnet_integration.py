@@ -3,7 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 import sys
 
-import numpy as np
+import pytest
+
+np = pytest.importorskip("numpy")
 
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
@@ -14,7 +16,7 @@ for source_root in (EXAMPLES_ROOT, GEOCORE_ROOT):
     if source not in sys.path:
         sys.path.insert(0, source)
 
-import geocore as gc  # noqa: E402
+gc = pytest.importorskip("geocore", reason="requires sibling geometry-py/geocore checkout")
 from geocore_pointnet_integration import run  # noqa: E402
 from train_pointnet_geocore_shapes import adapt_cloud, create_cloud, make_geometries  # noqa: E402
 
