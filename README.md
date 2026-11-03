@@ -18,6 +18,8 @@ benchmarking neural networks for 3D geometry and physics simulations.
 | Adaptive MeshGraphNet | Adaptive mesh graph | Experimental |
 | PointNet | Point cloud | Implemented |
 | PointNet++ | Hierarchical point cloud | Implemented |
+| PointNeXt | Hierarchical point cloud | Implemented |
+| DGCNN | Point cloud (dynamic k-NN graph) | Implemented |
 | 3D U-Net | Structured voxel grid | Implemented |
 | Fourier Neural Operator (FNO3D) | Structured 3D grid | Implemented |
 | Transolver | Irregular points / mesh nodes | Implemented |

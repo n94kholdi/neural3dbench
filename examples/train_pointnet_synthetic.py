@@ -1,4 +1,4 @@
-"""Small PointNet/PointNet++ checks for classification and point regression."""
+"""Small PointNet/PointNet++/PointNeXt/DGCNN checks for classification and point regression."""
 
 from __future__ import annotations
 
@@ -8,7 +8,14 @@ from pathlib import Path
 import torch
 from torch.nn import functional as F
 
-from models import ModelInput, PointNet2Config, PointNetConfig, create_model
+from models import (
+    DGCNNConfig,
+    ModelInput,
+    PointNet2Config,
+    PointNetConfig,
+    PointNeXtConfig,
+    create_model,
+)
 from models.pointnet import feature_transform_regularizer
 from pointcloud import normalize_points, plot_point_cloud
 
@@ -68,7 +75,7 @@ def iterate_minibatches(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--model", choices=("pointnet", "pointnet2"), default="pointnet")
+    parser.add_argument("--model", choices=("pointnet", "pointnet2", "pointnext", "dgcnn"), default="pointnet")
     parser.add_argument(
         "--task", choices=("classification", "segmentation"), default="classification"
     )
@@ -110,19 +117,29 @@ def main() -> None:
         "input_dim": 3,
         "output_dim": output_dim,
         "task": args.task,
-        "global_dim": 1024,
         "dropout": 0.3,
     }
+    first_count = min(64, args.num_points)
     if args.model == "pointnet2":
-        first_count = min(64, args.num_points)
         config = PointNet2Config(
             sample_counts=(first_count, min(16, first_count)),
             radii=(0.25, 0.5),
             neighbor_counts=(16, 32),
+            global_dim=1024,
             **common_config,
         )
+    elif args.model == "pointnext":
+        config = PointNeXtConfig(
+            sample_counts=(first_count, min(16, first_count)),
+            blocks=(1, 2, 1),
+            radius=0.25,
+            neighbor_count=16,
+            **common_config,
+        )
+    elif args.model == "dgcnn":
+        config = DGCNNConfig(neighbor_count=16, **common_config)
     else:
-        config = PointNetConfig(**common_config)
+        config = PointNetConfig(global_dim=1024, **common_config)
     model = create_model(config)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
     checkpoint = args.checkpoint or Path(f"checkpoints/{args.model}_{args.task}.pt")
