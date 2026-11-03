@@ -1,0 +1,450 @@
+# neural3d-advisor curated metadata.
+#
+# One entry per model registered in models.ModelRegistry (keyed by the canonical
+# registry name; aliases such as "pointnet++" are detected automatically).
+# Registered models without an entry still appear in the advisor, with
+# conservative defaults generated from their config and docstrings, and
+# tests/test_advisor_mcp.py fails until an entry is added here.
+#
+# Field reference
+#   display_name       Human-readable name.
+#   paradigm           One-line architectural paradigm.
+#   representations    Native inputs: point_cloud | mesh_graph | voxel_grid | continuous_coords
+#   also_accepts       {representation: conversion note} for inputs usable after conversion.
+#   tasks              surrogate_simulation | pde_operator | segmentation_classification | field_fitting
+#   element            What num_elements counts for this model (point, node, voxel, ...).
+#   inductive_biases, merits, demerits: lists of short statements.
+#   complexity         time / memory Big-O strings plus notes (N = elements per sample).
+#   memory_model       Training-activation heuristic at the default config, in floats per sample:
+#                        per_element * N + per_element_sq * N^2 + per_sample
+#                      Calibrated by counting autograd-saved tensors for a forward/backward pass
+#                      at two sizes (graphs with ~6 directed edges per node).
+#   speed, expressivity  1 (low) .. 5 (high), relative within this catalog.
+#   dynamic_topology   true | partial | false: copes with connectivity/geometry changing per sample or step.
+#   keywords           Problem-description terms that favour this model in recommendations.
+#   docs, examples     Optional extra paths; docs/<name>.md and examples/**/*<name>*.py are auto-discovered.
+#   registry_name      Only for catalog-only variants that reuse another registered model.
+
+version: 1
+
+models:
+  pointnet:
+    display_name: PointNet
+    paradigm: Shared per-point MLP with learned T-Net alignment and symmetric max-pool aggregation.
+    representations: [point_cloud]
+    also_accepts:
+      mesh_graph: Drop connectivity and use mesh vertices as points (pointcloud.mesh_to_point_cloud).
+    tasks: [segmentation_classification, surrogate_simulation]
+    element: point
+    inductive_biases:
+      - Permutation invariance through a symmetric (max) aggregation.
+      - Points are processed independently until the global pooling; no notion of locality.
+      - Learned input/feature transforms approximate rigid-alignment invariance.
+    merits:
+      - Linear cost in the number of points; simple, fast and robust to missing points.
+      - Handles variable point counts via point_mask without any graph construction.
+      - Strong baseline for global shape classification.
+    demerits:
+      - No local neighbourhood structure, so fine geometric detail and local fields are poorly captured.
+      - Max pooling discards most per-point information; weak for dense physical-field regression.
+      - The 64x64 feature T-Net adds a regulariser and training instability on small data.
+    complexity:
+      time: O(N)
+      memory: O(N)
+      notes: Per-point channel widths up to 1024 dominate activation memory.
+    memory_model: {per_element: 11000, per_element_sq: 0, per_sample: 0}
+    speed: 5
+    expressivity: 2
+    dynamic_topology: true
+    keywords: [classification, shape, segmentation, baseline, unordered]
+
+  pointnet2:
+    display_name: PointNet++
+    paradigm: Hierarchical set abstraction (farthest-point sampling + ball-query grouping + mini-PointNets) with feature propagation.
+    representations: [point_cloud]
+    also_accepts:
+      mesh_graph: Drop connectivity and use mesh vertices as points.
+    tasks: [segmentation_classification, surrogate_simulation]
+    element: point
+    inductive_biases:
+      - Locality through metric-ball neighbourhoods at multiple scales.
+      - Translation invariance inside each local region (relative coordinates).
+      - Hierarchical, CNN-like receptive-field growth on irregular samples.
+    merits:
+      - Captures local geometry far better than PointNet; good for segmentation and point-wise fields.
+      - Fixed sample counts (sample_counts) cap the cost of the deep layers.
+    demerits:
+      - Farthest-point sampling is sequential (O(S*N)) and slow on large clouds.
+      - Dense square-distance matrices of shape [B, N, S] dominate memory for large N.
+      - Ball radii are absolute and must match coordinate normalisation.
+    complexity:
+      time: O(S*N + S*K*C)
+      memory: O(S*N)
+      notes: S = first-stage centroids (512 default), K = neighbours per ball (32/64).
+    memory_model: {per_element: 1700, per_element_sq: 0, per_sample: 20000000}
+    speed: 3
+    expressivity: 3
+    dynamic_topology: true
+    keywords: [segmentation, local, hierarchical, part, classification]
+
+  pointnext:
+    display_name: PointNeXt
+    paradigm: PointNet++ with radius-normalised grouping, InvResMLP residual stages and modern training recipe.
+    representations: [point_cloud]
+    also_accepts:
+      mesh_graph: Drop connectivity and use mesh vertices as points.
+    tasks: [segmentation_classification]
+    element: point
+    inductive_biases:
+      - Same locality and hierarchy as PointNet++.
+      - Radius-normalised relative coordinates give scale-consistent local features.
+      - Inverted-residual MLPs favour deep, well-conditioned feature extractors.
+    merits:
+      - Higher accuracy than PointNet++ at a fraction of the parameters (~0.57M default).
+      - Scales depth through residual stages without collapsing training.
+    demerits:
+      - Inherits sequential FPS and [B, N, S] distance matrices.
+      - More hyperparameters (radius scaling, expansion, blocks) to tune.
+    complexity:
+      time: O(S*N + S*K*C)
+      memory: O(S*N)
+      notes: Four downsampling stages (512, 128, 32, 8 centroids by default).
+    memory_model: {per_element: 600, per_element_sq: 0, per_sample: 5400000}
+    speed: 3
+    expressivity: 4
+    dynamic_topology: true
+    keywords: [classification, segmentation, residual, state-of-the-art]
+
+  dgcnn:
+    display_name: DGCNN (EdgeConv)
+    paradigm: Dynamic graph CNN; EdgeConv over k-NN graphs recomputed in feature space at every layer.
+    representations: [point_cloud]
+    also_accepts:
+      mesh_graph: Use mesh vertices as points; the supplied connectivity is ignored and rebuilt by k-NN.
+    tasks: [segmentation_classification]
+    element: point
+    inductive_biases:
+      - Locality defined in learned feature space, not only Euclidean space.
+      - Edge features h(x_i, x_j - x_i) encode relative geometry (translation awareness).
+      - Graph topology is re-learned per layer, so semantic neighbours can be far apart spatially.
+    merits:
+      - Excellent local-geometry modelling for classification and part segmentation.
+      - No fixed connectivity needed; naturally handles changing topology.
+    demerits:
+      - Dense k-NN builds an [B, N, N] distance matrix at every EdgeConv layer (quadratic memory).
+      - Edge activations scale with k * N * C; high k quickly saturates VRAM.
+      - Impractical beyond roughly 10^4 points per sample without chunked/approximate k-NN.
+    complexity:
+      time: O(N^2 + k*N)
+      memory: O(N^2 + k*N)
+      notes: Dense pairwise distances per layer; k = neighbor_count (20 default).
+    memory_model: {per_element: 32000, per_element_sq: 4, per_sample: 0}
+    speed: 2
+    expressivity: 4
+    dynamic_topology: true
+    keywords: [classification, segmentation, dynamic graph, knn, edge, local geometry]
+
+  gcn:
+    display_name: Graph Convolutional Network (GCN)
+    paradigm: Spectral-inspired message passing with symmetric degree-normalised neighbour averaging.
+    representations: [mesh_graph]
+    tasks: [surrogate_simulation, segmentation_classification]
+    element: node
+    inductive_biases:
+      - Homophily - neighbouring nodes have similar values (low-pass graph filtering).
+      - Isotropic aggregation; all neighbours weighted only by degree.
+      - Permutation equivariance over nodes.
+    merits:
+      - Very cheap - O(E) per layer and tiny parameter count.
+      - Works on any connectivity supplied per sample (variable meshes).
+    demerits:
+      - Oversmoothing with depth; receptive field grows only one hop per layer.
+      - Ignores edge features and geometry unless they are encoded into node features.
+      - Isotropic filters cannot represent directional physics (advection, anisotropy).
+    complexity:
+      time: O(L * E * C)
+      memory: O(N + E)
+      notes: Mesh graphs typically have E ~ 6-7 N directed edges.
+    memory_model: {per_element: 2100, per_element_sq: 0, per_sample: 0}
+    speed: 5
+    expressivity: 1
+    dynamic_topology: true
+    docs: [docs/adding_a_network.md]
+    keywords: [baseline, node, graph, diffusion, smooth]
+
+  gat:
+    display_name: Graph Attention Network (GAT)
+    paradigm: Message passing with learned, multi-head attention coefficients over each neighbourhood.
+    representations: [mesh_graph]
+    tasks: [surrogate_simulation, segmentation_classification]
+    element: node
+    inductive_biases:
+      - Anisotropic neighbour weighting learned from node features.
+      - Locality restricted to the supplied edges; permutation equivariance.
+    merits:
+      - More expressive than GCN at similar cost; attention weights are inspectable.
+      - Handles heterogeneous degree and irregular meshes.
+    demerits:
+      - Still one hop per layer; long-range effects need depth.
+      - Attention does not use edge features in this implementation.
+      - Multi-head edge activations raise memory to O(E * heads).
+    complexity:
+      time: O(L * E * H * C)
+      memory: O(N + E * H)
+      notes: H = num_heads (4 default).
+    memory_model: {per_element: 2700, per_element_sq: 0, per_sample: 0}
+    speed: 4
+    expressivity: 2
+    dynamic_topology: true
+    docs: [docs/adding_a_network.md]
+    keywords: [attention, node, graph, anisotropic, interpretable]
+
+  meshgraphnet:
+    display_name: MeshGraphNet
+    paradigm: Encode-process-decode graph network with residual edge and node MLP updates (Pfaff et al.).
+    representations: [mesh_graph]
+    tasks: [surrogate_simulation]
+    element: node
+    inductive_biases:
+      - Local physics - updates depend on neighbours via learned edge messages.
+      - Relative edge features (displacements, lengths) give translation invariance.
+      - Many message-passing steps approximate an explicit time integrator on the mesh.
+    merits:
+      - State-of-the-art learned simulator for CFD, cloth and structural dynamics on meshes.
+      - Uses edge features natively; generalises to unseen meshes and resolutions.
+      - Supports autoregressive rollouts (simulation.rollout).
+    demerits:
+      - 15 processor steps with 128-d edge MLPs make it memory heavy (O(steps * E * latent)).
+      - Information travels at most processor_steps hops; very large meshes need multiscale variants.
+      - Rollout error accumulation requires noise injection or other stabilisation.
+    complexity:
+      time: O(P * E * C^2)
+      memory: O(P * (N + E) * C)
+      notes: P = processor_steps (15), C = latent_dim (128).
+    memory_model: {per_element: 94000, per_element_sq: 0, per_sample: 0}
+    speed: 2
+    expressivity: 5
+    dynamic_topology: true
+    keywords: [simulation, cfd, cloth, structural, rollout, time, transient, mesh, fluid, deformation]
+
+  adaptive_meshgraphnet:
+    display_name: Adaptive MeshGraphNet
+    registry_name: meshgraphnet
+    paradigm: MeshGraphNet rollout coupled with mesh.adaptation remeshing and barycentric state transfer.
+    representations: [mesh_graph]
+    tasks: [surrogate_simulation]
+    element: node
+    inductive_biases:
+      - Same local message-passing biases as MeshGraphNet.
+      - Resolution follows the solution - refine where local variation is high.
+    merits:
+      - Concentrates nodes on shocks, contacts and boundary layers; keeps node count bounded.
+      - Topology changes every step are supported by rebuilding the graph after remeshing.
+    demerits:
+      - Remeshing (TriangleCentroidRemesher) and state transfer run on CPU between steps.
+      - Interpolation during state transfer adds diffusion and error.
+      - The repository implementation is 2D triangle based; not a learned sizing field.
+    complexity:
+      time: O(P * E * C^2) + remeshing O(N log N)
+      memory: O(P * (N + E) * C)
+      notes: Memory is that of MeshGraphNet at the adapted node count.
+    memory_model: {per_element: 94000, per_element_sq: 0, per_sample: 0}
+    speed: 1
+    expressivity: 5
+    dynamic_topology: true
+    docs: [docs/meshgraphnet.md]
+    examples: [examples/adaptive_meshgraphnet_synthetic.py, tests/test_adaptive_meshgraphnet.py]
+    keywords: [adaptive, remeshing, refinement, shock, contact, topology, rollout, transient]
+
+  unet3d:
+    display_name: 3D U-Net
+    paradigm: Convolutional encoder-decoder with skip connections on dense voxel grids.
+    representations: [voxel_grid]
+    also_accepts:
+      point_cloud: Voxelize first with volumetric.point_cloud_to_voxel_grid.
+      mesh_graph: Voxelize mesh vertices and node fields with volumetric.mesh_to_voxel_grid.
+    tasks: [segmentation_classification, surrogate_simulation]
+    element: voxel
+    inductive_biases:
+      - Translation equivariance and locality via 3x3x3 convolutions.
+      - Multi-scale context through pooling plus fine detail through skip connections.
+    merits:
+      - Mature, stable training; strong for volumetric segmentation and dense field regression.
+      - Cost is linear in voxels; well optimised by cuDNN.
+    demerits:
+      - Cubic growth in resolution - N = R^3 voxels; 256^3 is ~1.7e7 voxels per sample.
+      - Fixed grid resolution; thin features and curved boundaries are staircased.
+      - Voxelizing complex geometries consumes substantial memory and loses geometric detail.
+    complexity:
+      time: O(N * C^2 * k^3) with N = R^3
+      memory: O(N * C) = O(R^3 * C)
+      notes: Activation memory dominated by the full-resolution level.
+    memory_model: {per_element: 440, per_element_sq: 0, per_sample: 0}
+    speed: 4
+    expressivity: 3
+    dynamic_topology: partial
+    keywords: [voxel, volumetric, segmentation, medical, ct, dense, grid, image]
+
+  fno3d:
+    display_name: Fourier Neural Operator (FNO3D)
+    paradigm: Neural operator with global spectral convolutions on truncated Fourier modes over a regular grid.
+    representations: [voxel_grid]
+    also_accepts:
+      point_cloud: Interpolate onto a regular grid first, or use GINO / Transolver instead.
+      mesh_graph: Interpolate onto a regular grid first, or use GINO / Transolver instead.
+    tasks: [pde_operator, surrogate_simulation]
+    element: voxel
+    inductive_biases:
+      - Global receptive field per layer via FFT; smooth, band-limited solution operators.
+      - Translation equivariance and implicit periodicity (padding mitigates non-periodic BCs).
+      - Discretisation-convergent weights - trained modes transfer across resolutions.
+    merits:
+      - Learns solution operators for parametric PDEs; zero-shot super-resolution evaluation.
+      - O(N log N) global mixing at every layer.
+    demerits:
+      - Requires regular grids; complex geometries need masking or interpolation.
+      - Parameter count grows with modes^3 * width^2 (28M at the default 12^3 modes).
+      - Truncated modes miss sharp discontinuities and shocks (Gibbs ringing).
+    complexity:
+      time: O(N log N) with N = R^3
+      memory: O(N * C + modes^3 * C^2)
+      notes: Cubic growth with grid resolution R; complex rFFT buffers double some activations.
+    memory_model: {per_element: 520, per_element_sq: 0, per_sample: 30000000}
+    speed: 4
+    expressivity: 4
+    dynamic_topology: partial
+    keywords: [operator, pde, darcy, navier-stokes, heat, parametric, super-resolution, spectral, periodic, grid]
+
+  gino:
+    display_name: Geometry-Informed Neural Operator (GINO)
+    paradigm: Graph kernel integral point-to-grid encoder, FNO latent on a regular grid, grid-to-point decoder.
+    representations: [point_cloud, mesh_graph]
+    tasks: [pde_operator, surrogate_simulation]
+    element: point
+    inductive_biases:
+      - Geometry enters through radius-limited kernel integrals; global mixing via FNO.
+      - Discretisation-agnostic input and query locations.
+    merits:
+      - Operator learning on irregular 3D geometries (e.g. car aerodynamics) with arbitrary query points.
+      - Latent grid size is fixed, so the FNO cost is independent of the input point count.
+    demerits:
+      - Kernel-integral pair count grows with point density and kernel_radius; tuning is delicate.
+      - Two interpolation stages limit resolution of thin boundary layers.
+      - Chunked neighbour search trades speed for bounded memory.
+    complexity:
+      time: O(N * M_r + G log G)
+      memory: O(N * M_r + G * C)
+      notes: M_r = latent grid nodes within kernel_radius of a point; G = latent_resolution^3 (16^3).
+    memory_model: {per_element: 100, per_element_sq: 0, per_sample: 10000000}
+    speed: 3
+    expressivity: 4
+    dynamic_topology: true
+    keywords: [operator, irregular, geometry, aerodynamics, car, pressure, query, pde, cfd]
+
+  transolver:
+    display_name: Transolver
+    paradigm: Transformer with Physics-Attention - points are softly assigned to K learnable slices and attention runs among slice tokens.
+    representations: [point_cloud, mesh_graph]
+    also_accepts:
+      voxel_grid: Flatten voxel centres to points.
+    tasks: [pde_operator, surrogate_simulation]
+    element: point
+    inductive_biases:
+      - Points in similar physical states share slice tokens regardless of location.
+      - Global interaction through K slice tokens instead of N x N attention.
+      - Geometry-agnostic - no connectivity or grid required.
+    merits:
+      - Linear in N while keeping a global receptive field; strong PDE-benchmark accuracy.
+      - Works on irregular meshes, point clouds and flattened grids alike.
+    demerits:
+      - Deep 256-wide stack keeps large per-point activations (~37k floats per point at defaults).
+      - No explicit local geometry; sharp local features may need more slices or a local branch.
+      - Slice count K is a sensitive hyperparameter.
+    complexity:
+      time: O(L * (K * N * C + K^2 * C))
+      memory: O(L * N * C)
+      notes: K = num_slices (32), L = num_layers (8), C = hidden_dim (256).
+    memory_model: {per_element: 37000, per_element_sq: 0, per_sample: 0}
+    speed: 3
+    expressivity: 5
+    dynamic_topology: true
+    keywords: [operator, pde, transformer, attention, irregular, airfoil, elasticity, cfd, global]
+
+  siren:
+    display_name: SIREN
+    paradigm: Coordinate MLP with periodic sine activations (implicit neural representation).
+    representations: [continuous_coords]
+    also_accepts:
+      point_cloud: Use point coordinates as query locations.
+    tasks: [field_fitting, pde_operator]
+    element: query point
+    inductive_biases:
+      - Smooth, high-frequency-capable continuous fields; derivatives are again SIRENs.
+      - No spatial coupling between queries - each point evaluated independently.
+    merits:
+      - Represents fine detail and analytic derivatives, ideal for PINN residuals and SDFs.
+      - Memory linear in query count; resolution-free output.
+    demerits:
+      - Typically fitted per instance; does not generalise across geometries without conditioning.
+      - Sensitive to omega_0 and coordinate scaling; can fit noise.
+      - PDE residual losses need higher-order autograd, roughly tripling activation memory.
+    complexity:
+      time: O(N * L * C^2)
+      memory: O(N * L * C)
+      notes: Multiply memory by ~3 when computing second derivatives for PDE residuals.
+    memory_model: {per_element: 2100, per_element_sq: 0, per_sample: 0}
+    speed: 5
+    expressivity: 3
+    dynamic_topology: false
+    keywords: [implicit, sdf, pinn, coordinate, continuous, derivative, high-frequency, neural field]
+
+  mlp:
+    display_name: Coordinate MLP
+    paradigm: Pointwise fully connected network mapping coordinates (+ features) to field values.
+    representations: [continuous_coords]
+    also_accepts:
+      point_cloud: Use point coordinates as query locations.
+    tasks: [field_fitting, pde_operator]
+    element: query point
+    inductive_biases:
+      - Spectral bias toward low-frequency, smooth functions.
+      - No spatial coupling between queries.
+    merits:
+      - Simplest PINN backbone; cheap and easy to differentiate.
+    demerits:
+      - Struggles with high-frequency or multiscale solutions (use SIREN or Fourier features).
+      - Per-instance fitting; no geometry generalisation.
+    complexity:
+      time: O(N * L * C^2)
+      memory: O(N * L * C)
+      notes: Multiply memory by ~3 for second-order PDE residuals.
+    memory_model: {per_element: 800, per_element_sq: 0, per_sample: 0}
+    speed: 5
+    expressivity: 1
+    dynamic_topology: false
+    keywords: [pinn, baseline, coordinate, smooth, continuous]
+
+  deep_nurbs:
+    display_name: Deep NURBS
+    paradigm: NURBS-admissible PINN ansatz - phi * NN(x) + zeta on a parametric surface so boundary conditions hold exactly.
+    representations: [continuous_coords]
+    tasks: [field_fitting, pde_operator]
+    element: query point
+    inductive_biases:
+      - Exact imposition of Dirichlet boundary conditions via a NURBS distance-like function.
+      - Solution lives on a single parametric (u, v) patch geometry from CAD.
+    merits:
+      - CAD-native geometry; no meshing needed and BCs never violated.
+      - Tiny network (hundreds of parameters by default) and cheap evaluation.
+    demerits:
+      - One fixed geometry per model; not an operator over geometries.
+      - Only 2D parametric surfaces in this implementation; multi-patch domains unsupported.
+    complexity:
+      time: O(N * (L * C^2 + p^2))
+      memory: O(N * L * C)
+      notes: p = NURBS degree; basis evaluation is per query.
+    memory_model: {per_element: 110, per_element_sq: 0, per_sample: 0}
+    speed: 5
+    expressivity: 2
+    dynamic_topology: false
+    keywords: [nurbs, cad, isogeometric, boundary condition, pinn, surface, parametric]
