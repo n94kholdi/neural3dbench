@@ -60,6 +60,7 @@ def test_input_mismatch() -> None:
         assert tasks.input_mismatch(name)
     assert "voxel_fields" in tasks.input_mismatch("fno3d")
     assert "detector" in tasks.input_mismatch("votenet", "chair_parts")
+    assert "poses" in tasks.input_mismatch("dcp", "chair_parts")
 
 
 def test_loss_and_metrics() -> None:
@@ -98,6 +99,7 @@ def test_partial_shapes_and_chamfer() -> None:
     assert torch.isfinite(pred.grad).all()
     assert tasks.dataset_for_problem("shape_completion") == "partial_shapes"
     assert tasks.dataset_for_problem("object_detection") is None
+    assert tasks.dataset_for_problem("registration") is None
 
 
 def test_completion_mismatch() -> None:

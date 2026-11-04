@@ -1,5 +1,6 @@
 from .base import BaseNetwork
 from .configs import BaseModelConfig
+from .dcp import DCP, DCPConfig
 from .deep_nurbs import DeepNURBS, DeepNURBSConfig
 from .dgcnn import DGCNN, DGCNNConfig
 from .foldingnet import FoldingNet, FoldingNetConfig
@@ -31,6 +32,8 @@ __all__ = [
     "BaseModelConfig",
     "BaseNetwork",
     "CoordinateRepresentationAdapter",
+    "DCP",
+    "DCPConfig",
     "DeepNURBS",
     "DeepNURBSConfig",
     "DGCNN",

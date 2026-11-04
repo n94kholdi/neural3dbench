@@ -32,9 +32,9 @@ REPRESENTATIONS = {
     "continuous_coords": "Continuous fields (coordinates)",
 }
 TASKS = ("surrogate_simulation", "pde_operator", "segmentation_classification", "field_fitting", "shape_completion",
-         "object_detection")
+         "object_detection", "registration")
 # Not covered by any registered model yet; listed so the advisor can say so (tools/mcp_advisor/advisor.py).
-UNCOVERED_TASKS = ("instance_segmentation", "shape_generation", "registration", "scene_flow")
+UNCOVERED_TASKS = ("instance_segmentation", "shape_generation", "scene_flow")
 PRECISIONS = ("fp32", "fp16", "bf16", "amp")
 POLL_SECONDS = 2.0
 _VERTEX_KEYS = ("vertices", "coords", "coordinates", "points", "pos")

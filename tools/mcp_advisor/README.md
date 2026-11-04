@@ -69,7 +69,7 @@ Vocabulary:
   Aliases such as `mesh`, `voxel`, `points` and the repository codes
   (`POINT_CLOUD`, `GRAPH`, `GRID`, `PARAMETRIC_SURFACE`) are accepted.
 - Tasks: `surrogate_simulation`, `pde_operator`, `segmentation_classification`,
-  `field_fitting`, `shape_completion`, `object_detection`.
+  `field_fitting`, `shape_completion`, `object_detection`, `registration`.
 - Precision: `fp32`, `fp16`, `bf16`, `amp`.
 - Hardware tiers: `<8GB`, `16-24GB`, `Multi-GPU / >24GB`.
 

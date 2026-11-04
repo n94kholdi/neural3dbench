@@ -343,10 +343,10 @@ def make_dataset(name: str, num_samples: int, num_points: int, seed: int = 0) ->
 def dataset_for_problem(advisor_task: str, description: str = "") -> str | None:
     """Pick the synthetic dataset that matches an advisor task domain and free-text description.
 
-    None for object detection: no dashboard dataset has box labels.
+    None for object detection and registration: no dashboard dataset has box labels or pose pairs.
     """
     text = description.lower()
-    if advisor_task == "object_detection":
+    if advisor_task in ("object_detection", "registration"):
         return None
     if advisor_task == "shape_completion":
         return "partial_shapes"
@@ -388,6 +388,9 @@ def input_mismatch(model_name: str, dataset_name: str | None = None) -> str | No
     if hasattr(ModelRegistry.get(model_name), "detection_loss"):
         return (f"`{model_name}` is a 3D box detector; the dashboard has no box-labelled dataset. "
                 f"Train it with `model.detection_loss` (see docs/{model_name}.md).")
+    if hasattr(ModelRegistry.get(model_name), "registration_loss"):
+        return (f"`{model_name}` registers two clouds; the dashboard has no paired dataset with ground-truth poses. "
+                f"Train it with `model.registration_loss` (see docs/{model_name}.md).")
     capabilities = ModelRegistry.create(model_name).capabilities
     extra = sorted(set(capabilities.requires) - {"coordinates"})
     if capabilities.representation == "POINT_CLOUD" and not extra:

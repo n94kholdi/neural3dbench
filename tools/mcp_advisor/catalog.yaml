@@ -12,7 +12,7 @@
 #   representations    Native inputs: point_cloud | mesh_graph | voxel_grid | continuous_coords
 #   also_accepts       {representation: conversion note} for inputs usable after conversion.
 #   tasks              surrogate_simulation | pde_operator | segmentation_classification | field_fitting
-#                      | shape_completion | object_detection
+#                      | shape_completion | object_detection | registration
 #   element            What num_elements counts for this model (point, node, voxel, ...).
 #   inductive_biases, merits, demerits: lists of short statements.
 #   complexity         time / memory Big-O strings plus notes (N = elements per sample).
@@ -635,3 +635,37 @@ models:
     receptive_field: {kind: global, note: Seed features see up to the last ball radius (1.2 m); proposals aggregate votes within proposal_radius.}
     resolution_transfer: partial
     keywords: [detection, indoor, scan, bounding box, votes, hough, scannet, sun rgb-d, furniture]
+
+  dcp:
+    display_name: DCP (Deep Closest Point)
+    paradigm: Shared DGCNN embeddings of two clouds, a transformer for cross-cloud context, softmax soft matching and a differentiable SVD (Procrustes) for one rigid transform.
+    representations: [point_cloud]
+    also_accepts:
+      mesh_graph: Use mesh vertices (or surface samples) of both shapes as source and target clouds; connectivity is ignored.
+    tasks: [registration]
+    element: point
+    inductive_biases:
+      - One global rigid transform (R, t) per pair; no scale, non-rigid motion or multiple bodies.
+      - Every source point has a soft match in the target; the SVD treats all matches with equal weight.
+      - Local geometry from k-NN EdgeConv features; the transformer makes source features target-aware and vice versa.
+    merits:
+      - One forward pass, no ICP iterations; insensitive to initialisation within the trained rotation range.
+      - Fully differentiable and end-to-end; predicts correspondences as well as the pose.
+      - Source and target may have different point counts; source padding via point_mask.
+    demerits:
+      - Assumes the clouds overlap almost fully; partial overlap and outliers degrade it (no outlier rejection).
+      - Features are not rotation invariant; it generalises poorly to rotations larger than seen in training.
+      - Quadratic cost in points from k-NN and the N x M score matrix; meant for ~1k-point object clouds, not scenes.
+      - Needs paired clouds with ground-truth (R, t) to train; SVD gradients are unstable near degenerate geometry.
+    complexity:
+      time: O(N^2 + N*M)
+      memory: O(N*k + N*M)
+      notes: N = source points, M = target points, k = neighbor_count (20); memory_model assumes M = N. Feature-space k-NN in every EdgeConv dominates.
+    memory_model: {per_element: 92500, per_element_sq: 9, per_sample: 6200000}
+    speed: 3
+    expressivity: 3
+    dynamic_topology: true
+    symmetries: [permutation]
+    receptive_field: {kind: global, note: Each point embedding sees its feature-space k-NN, then attends to every point of both clouds through the transformer.}
+    resolution_transfer: partial
+    keywords: [registration, alignment, align, pose, rigid, icp, correspondence, scan matching, modelnet40]

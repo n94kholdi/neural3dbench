@@ -21,7 +21,8 @@ CATALOG_PATH = Path(__file__).with_name("catalog.yaml")
 INTROSPECT_SCRIPT = Path(__file__).with_name("_introspect.py")
 
 REPRESENTATIONS = ("point_cloud", "mesh_graph", "voxel_grid", "continuous_coords")
-TASKS = ("surrogate_simulation", "pde_operator", "segmentation_classification", "field_fitting", "shape_completion", "object_detection")
+TASKS = ("surrogate_simulation", "pde_operator", "segmentation_classification", "field_fitting", "shape_completion", "object_detection",
+         "registration")
 REQUIRED_CATALOG_FIELDS = (
     "display_name",
     "paradigm",
@@ -68,6 +69,7 @@ _TASK_KEYWORDS = {
     "field_fitting": ("pinn", "implicit", "sdf", "fit", "neural field", "reconstruct"),
     "shape_completion": ("complet", "partial scan", "missing part", "upsampl", "densif"),
     "object_detection": ("detect", "bounding box", "3d box", "localiz"),
+    "registration": ("registr", "align two", "alignment", "pose estimat", "icp", "correspondence"),
 }
 
 # Capabilities no catalog task covers. A catalog entry may list one of these keys under ``tasks``
@@ -86,14 +88,6 @@ MISSING_CAPABILITIES = {
         "suggested_networks": [
             {"name": "PointFlow", "why": "Continuous normalizing flow over shapes and points.", "reference": "https://arxiv.org/abs/1906.12320"},
             {"name": "LION", "why": "Latent point diffusion; current quality baseline.", "reference": "https://arxiv.org/abs/2210.06978"},
-        ],
-    },
-    "registration": {
-        "keywords": ("registr", "align two", "alignment", "pose estimat", "icp", "correspondence"),
-        "needs": "Two clouds in, one rigid transform (R, t) or correspondences out: a pair encoder and a pose loss.",
-        "suggested_networks": [
-            {"name": "DCP", "why": "Deep Closest Point: attention matching plus differentiable SVD.", "reference": "https://arxiv.org/abs/1905.03304"},
-            {"name": "PointNetLK", "why": "PointNet features inside a Lucas-Kanade loop.", "reference": "https://arxiv.org/abs/1903.05711"},
         ],
     },
     "scene_flow": {

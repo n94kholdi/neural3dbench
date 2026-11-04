@@ -126,7 +126,6 @@ def test_recommendations_respect_input_and_flag_vram(advisor):
     ("scene flow between two lidar frames", "scene_flow"),
     ("generate new shapes with diffusion", "shape_generation"),
     ("instance segmentation of chairs in an office scan", "instance_segmentation"),
-    ("rigid registration of two scans", "registration"),
 ])
 def test_uncovered_task_returns_no_fit(advisor, query, capability):
     result = advisor.recommend_architecture(query, "point_cloud", 4096)
@@ -271,3 +270,9 @@ def test_object_detection_recommends_detectors(advisor):
     assert result["verdict"] == "fit" and "object_detection" in result["inferred_tasks"]
     assert result["recommendations"][0]["model"] == "pointpillars"
     assert {row["model"] for row in result["recommendations"][:2]} == {"pointpillars", "votenet"}
+
+
+def test_registration_recommends_dcp(advisor):
+    result = advisor.recommend_architecture("rigid registration of two scans", "point_cloud", 1024)
+    assert result["verdict"] == "fit" and "registration" in result["inferred_tasks"]
+    assert result["recommendations"][0]["model"] == "dcp"
