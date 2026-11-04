@@ -27,7 +27,10 @@ server = _Server(
         "Decision support for Neural3DBench 3D architectures. Models are discovered live from "
         "models.ModelRegistry, docs/ and tools/mcp_advisor/catalog.yaml. Representations: point_cloud, "
         "mesh_graph, voxel_grid, continuous_coords. Tasks: surrogate_simulation, pde_operator, "
-        "segmentation_classification, field_fitting. Memory and time figures are heuristics. "
+        "segmentation_classification, field_fitting. Detection, instance segmentation, completion, "
+        "generation, registration and scene flow are not covered: recommend_architecture then returns "
+        "verdict no_fit with networks to add; say so instead of proposing a model. "
+        "Memory and time figures are heuristics. "
         "Before training, run audit_problem_assumptions and check_symmetry_and_invariance."
     ),
 )
@@ -62,6 +65,8 @@ def recommend_architecture(
     input_format: point_cloud | mesh_graph | voxel_grid | continuous_coords
     max_elements_per_sample: points, nodes or voxels per sample.
     target_metric: accuracy | speed
+    Returns ``verdict``: fit | weak_fit | no_fit. On no_fit, ``missing_capability``, ``reason`` and
+    ``suggested_networks`` name what to add; the ranked list is then only the closest registered models.
     """
     return advisor.recommend_architecture(
         problem_description,

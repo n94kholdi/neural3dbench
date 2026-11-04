@@ -62,10 +62,61 @@ _REPRESENTATION_ALIASES = {
     "implicit": "continuous_coords",
 }
 _TASK_KEYWORDS = {
-    "segmentation_classification": ("classif", "segment", "label", "recogni", "detect", "part"),
+    "segmentation_classification": ("classif", "segment", "label", "recogni", "parts"),
     "pde_operator": ("pde", "operator", "solver", "darcy", "navier", "poisson", "parametric", "super-resolution"),
     "surrogate_simulation": ("simulat", "surrogate", "cfd", "fea", "fem", "rollout", "transient", "dynamics", "time-step"),
     "field_fitting": ("pinn", "implicit", "sdf", "fit", "neural field", "reconstruct"),
+}
+
+# Capabilities no catalog task covers. A catalog entry may list one of these keys under ``tasks``
+# once a model implements it; until then the advisor answers "no_fit" instead of a wrong model.
+MISSING_CAPABILITIES = {
+    "object_detection": {
+        "keywords": ("detect", "bounding box", "3d box", "localiz"),
+        "needs": "Oriented 3D boxes per object (center, size, heading, class): a box head, anchor/vote matching and a box loss.",
+        "suggested_networks": [
+            {"name": "PointPillars", "why": "Fast pillar-based detector for LiDAR scenes.", "reference": "https://arxiv.org/abs/1812.05784"},
+            {"name": "VoteNet", "why": "Hough voting on PointNet++ features for indoor scenes.", "reference": "https://arxiv.org/abs/1904.09664"},
+        ],
+    },
+    "instance_segmentation": {
+        "keywords": ("instance",),
+        "needs": "A separate id per object instance, not only per class: offset/embedding head and clustering.",
+        "suggested_networks": [
+            {"name": "PointGroup", "why": "Semantic + center-offset branches, clustered into instances.", "reference": "https://arxiv.org/abs/2004.01658"},
+        ],
+    },
+    "shape_completion": {
+        "keywords": ("complet", "partial scan", "missing part", "upsampl", "densif"),
+        "needs": "Outputs a new point set, not values on the input points: a decoder and a Chamfer/EMD loss.",
+        "suggested_networks": [
+            {"name": "PCN", "why": "Coarse-to-fine completion decoder; the standard baseline.", "reference": "https://arxiv.org/abs/1808.00671"},
+            {"name": "FoldingNet", "why": "Folds a 2D grid onto the surface; light autoencoder.", "reference": "https://arxiv.org/abs/1712.07262"},
+        ],
+    },
+    "shape_generation": {
+        "keywords": ("generat", "synthes", "diffusion", "sample new shape"),
+        "needs": "A generative model over point sets (flow, diffusion or GAN), trained without per-point targets.",
+        "suggested_networks": [
+            {"name": "PointFlow", "why": "Continuous normalizing flow over shapes and points.", "reference": "https://arxiv.org/abs/1906.12320"},
+            {"name": "LION", "why": "Latent point diffusion; current quality baseline.", "reference": "https://arxiv.org/abs/2210.06978"},
+        ],
+    },
+    "registration": {
+        "keywords": ("registr", "align two", "alignment", "pose estimat", "icp", "correspondence"),
+        "needs": "Two clouds in, one rigid transform (R, t) or correspondences out: a pair encoder and a pose loss.",
+        "suggested_networks": [
+            {"name": "DCP", "why": "Deep Closest Point: attention matching plus differentiable SVD.", "reference": "https://arxiv.org/abs/1905.03304"},
+            {"name": "PointNetLK", "why": "PointNet features inside a Lucas-Kanade loop.", "reference": "https://arxiv.org/abs/1903.05711"},
+        ],
+    },
+    "scene_flow": {
+        "keywords": ("scene flow", "motion estimat", "optical flow"),
+        "needs": "Two frames in, a 3D motion vector per point of frame 1 out: a cross-frame correlation layer.",
+        "suggested_networks": [
+            {"name": "FlowNet3D", "why": "PointNet++ with a flow-embedding layer between frames.", "reference": "https://arxiv.org/abs/1806.01411"},
+        ],
+    },
 }
 
 BYTES_PER_FLOAT = {"fp32": 4, "fp16": 2, "bf16": 2, "amp": 2}
@@ -539,6 +590,7 @@ class Advisor:
                 "model": name,
                 "display_name": meta["display_name"],
                 "score": round(score, 2),
+                "matched_tasks": matched_tasks,
                 "complexity": meta["complexity"]["time"],
                 "estimated_training_peak_gb": train_gb,
                 "hardware_tier": estimate["hardware_tier"]["training"],
@@ -552,10 +604,31 @@ class Advisor:
             "input_format": input_rep,
             "inferred_tasks": inferred_tasks,
             "target_metric": target_metric,
+            **self._verdict(text, inferred_tasks, input_rep, ranked),
             "recommendations": ranked[:top_k],
             "considered": len(ranked),
             "note": "Heuristic ranking from catalog.yaml metadata; benchmark the top candidates on your data.",
         }
+
+    def _verdict(self, text: str, inferred_tasks: list[str], input_rep: str, ranked: list[dict]) -> dict[str, Any]:
+        """``fit``, ``weak_fit`` (no model matches the inferred task) or ``no_fit`` (capability missing)."""
+        covered = {task for model in self.state["models"].values() for task in model["metadata"]["tasks"]}
+        for capability, info in MISSING_CAPABILITIES.items():
+            if capability not in covered and any(word in text for word in info["keywords"]):
+                return {
+                    "verdict": "no_fit",
+                    "missing_capability": capability,
+                    "reason": f"No registered model does {capability.replace('_', ' ')}. {info['needs']}",
+                    "suggested_networks": info["suggested_networks"],
+                }
+        if not ranked:
+            return {"verdict": "no_fit", "missing_capability": f"{input_rep} input",
+                    "reason": f"No registered model accepts {input_rep} input, natively or after conversion.",
+                    "suggested_networks": []}
+        if inferred_tasks and not ranked[0]["matched_tasks"]:
+            return {"verdict": "weak_fit",
+                    "reason": f"No {input_rep} model is designed for {', '.join(inferred_tasks)}; the ranking is by input only."}
+        return {"verdict": "fit"}
 
 
 def hardware_tier(gigabytes: float) -> str:

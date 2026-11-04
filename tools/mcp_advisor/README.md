@@ -47,7 +47,7 @@ python /abs/path/to/Neural3DBench/tools/mcp_advisor/server.py   # from anywhere
 | --- | --- | --- |
 | `list_supported_models` | `representation=None`, `task=None` | Models with status, representations, tasks, complexity |
 | `get_model_dossier` | `model_name` | Paradigm, inductive biases, merits, demerits, tensor contract, complexity, default config, docs, references, examples |
-| `recommend_architecture` | `problem_description`, `input_format`, `max_elements_per_sample`, `dynamic_topology=False`, `target_metric="accuracy"` | Ranked models with score, rationale, pitfalls, estimated VRAM and hardware tier |
+| `recommend_architecture` | `problem_description`, `input_format`, `max_elements_per_sample`, `dynamic_topology=False`, `target_metric="accuracy"` | `verdict` (`fit`, `weak_fit`, `no_fit`); ranked models with score, matched tasks, rationale, pitfalls, estimated VRAM and hardware tier. On `no_fit`: `missing_capability`, `reason` and `suggested_networks` (name, why, paper) |
 | `estimate_resource_footprint` | `model_name`, `num_elements`, `batch_size=1`, `precision="fp32"` | Training and inference memory, hardware tier, scaling when N doubles, assumptions |
 | `refresh_model_catalog` | none | Sync report: added/removed models, uncurated models, models without docs, import errors |
 | `audit_problem_assumptions` | `problem_description`, `model_name=None`, `boundary_conditions="none"`, `topology_changes=False`, `geometry_varies=False`, `evaluate_at_unseen_resolution=False` | Per-model findings (BC enforcement, topology, per-instance fitting, resolution transfer, FFT periodicity) and the models without errors |

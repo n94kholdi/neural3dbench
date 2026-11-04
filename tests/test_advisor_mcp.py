@@ -119,6 +119,27 @@ def test_recommendations_respect_input_and_flag_vram(advisor):
     mgn = next(row for row in graph["recommendations"] if row["model"] == "meshgraphnet")
     assert any("VRAM saturation" in pitfall for pitfall in mgn["pitfalls"])
 
+    assert result["verdict"] == "fit"
+
+
+@pytest.mark.parametrize(("query", "capability"), [
+    ("3D object detection of cars in lidar scans", "object_detection"),
+    ("point cloud completion from partial scans", "shape_completion"),
+    ("instance segmentation of chairs in an office scan", "instance_segmentation"),
+    ("rigid registration of two scans", "registration"),
+])
+def test_uncovered_task_returns_no_fit(advisor, query, capability):
+    result = advisor.recommend_architecture(query, "point_cloud", 4096)
+    assert result["verdict"] == "no_fit" and result["missing_capability"] == capability
+    assert result["suggested_networks"] and all(n["reference"].startswith("https://") for n in result["suggested_networks"])
+
+
+def test_part_segmentation_query_fits(advisor):
+    query = "3D object semantic part segmentation on unordered point clouds to predict point-wise discrete category labels"
+    result = advisor.recommend_architecture(query, "point_cloud", 2048)
+    assert result["verdict"] == "fit"
+    assert result["recommendations"][0]["matched_tasks"] == ["segmentation_classification"]
+
 
 def test_parse_markdown_doc():
     parsed = parse_markdown_doc(textwrap.dedent("""\
