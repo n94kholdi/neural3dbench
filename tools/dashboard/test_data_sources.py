@@ -106,6 +106,10 @@ def test_import_shapenet_part(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     coords, labels = tasks.make_dataset("shapenet_part_chair", 3, 16)
     assert coords.shape == (3, 16, 3) and labels.min() >= 0 and labels.max() <= 3  # remapped from 12..15
 
+    partial, full = tasks.make_dataset("shapenet_part_chair_completion", 3, 16)
+    assert tasks.DATASETS["shapenet_part_chair_completion"].task == tasks.SHAPE_COMPLETION
+    assert partial.shape == full.shape == (3, 16, 3) and tasks.input_mismatch("pcn", "shapenet_part_chair_completion") is None
+
 
 def test_upload_save_and_rename_classes() -> None:
     coords = np.random.default_rng(0).random((4, 50, 3))

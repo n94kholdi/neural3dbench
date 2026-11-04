@@ -532,7 +532,7 @@ def main() -> None:
                             st.session_state["train_dataset"] = dataset.name
                             st.success(f"Saved `{dataset.name}` ({dataset.task.replace('_', ' ')}); name its classes below.")
 
-        saved = [n for n in DATASETS if n not in BUILTIN_DATASETS]
+        saved = [n for n, d in DATASETS.items() if n not in BUILTIN_DATASETS and d.task != "shape_completion"]
         if mode != "Preview geometry" and saved:
             st.subheader("Saved datasets: class names and colors")
             pick = st.selectbox("Saved dataset", saved, key="edit_dataset")

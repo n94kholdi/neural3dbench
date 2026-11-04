@@ -146,7 +146,15 @@ def _partial_shapes(num_samples: int, num_points: int, generator: torch.Generato
 
     Returns the partial cloud resampled to ``num_points`` and the complete cloud ``[B, N, 3]`` as target.
     """
-    full, _ = _primitive_shapes(num_samples, num_points, generator)
+    return _cut_side(_primitive_shapes(num_samples, num_points, generator)[0], generator)
+
+
+def _cut_side(full: torch.Tensor, generator: torch.Generator) -> tuple[torch.Tensor, torch.Tensor]:
+    """Remove the 40% of each cloud ``[B, N, 3]`` highest along a random direction; resample to N points.
+
+    Returns ``(partial [B, N, 3], full [B, N, 3])``.
+    """
+    num_samples, num_points, _ = full.shape
     direction = torch.randn(num_samples, 1, 3, generator=generator)
     height = (full * direction).sum(-1)
     kept = height.argsort(dim=1)[:, : max(1, int(0.6 * num_points))]
@@ -273,8 +281,20 @@ def update_classes(name: str, class_names: list[str], class_colors: list[str]) -
                             class_colors=class_colors, description=str(data["description"]))
 
 
+def _completion_make(make: Generator) -> Generator:
+    """Completion data from any dataset: its clouds with a random side cut away; labels are ignored."""
+
+    def completion(num_samples: int, num_points: int, generator: torch.Generator) -> tuple[torch.Tensor, torch.Tensor]:
+        return _cut_side(make(num_samples, num_points, generator)[0], generator)
+
+    return completion
+
+
 def register_npz(path: Path) -> Dataset:
-    """Register a saved ``.npz`` dataset under its file stem (re-registering replaces it)."""
+    """Register a saved ``.npz`` dataset under its file stem (re-registering replaces it).
+
+    Also registers ``<stem>_completion``: the same clouds as a shape-completion dataset.
+    """
     data = _load_npz(str(path), path.stat().st_mtime)
     if "labels" in data:
         task = PART_SEGMENTATION if data["labels"].ndim == 2 else SHAPE_CLASSIFICATION
@@ -289,6 +309,11 @@ def register_npz(path: Path) -> Dataset:
         class_colors=tuple(str(c) for c in data.get("class_colors", ())),
     )
     DATASETS[dataset.name] = dataset
+    DATASETS[f"{dataset.name}_completion"] = Dataset(
+        f"{dataset.name}_completion", SHAPE_COMPLETION,
+        f"{dataset.name} clouds with a random side cut away; complete the cloud.",
+        _completion_make(dataset.make),
+    )
     return dataset
 
 
