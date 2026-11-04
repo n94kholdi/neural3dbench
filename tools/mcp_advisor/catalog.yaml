@@ -22,6 +22,14 @@
 #   speed, expressivity  1 (low) .. 5 (high), relative within this catalog.
 #   dynamic_topology   true | partial | false: copes with connectivity/geometry changing per sample or step.
 #   keywords           Problem-description terms that favour this model in recommendations.
+#   symmetries         Symmetries guaranteed by the architecture: permutation | translation | rotation.
+#                      Leave rotation out unless the layers are provably SO(3)/SE(3)-equivariant.
+#   receptive_field    {kind: global | hops | conv_grid | pointwise, depth_key: config field counting
+#                      layers/steps, kernel_key: conv kernel field (conv_grid), note: free text}.
+#   resolution_transfer  true | partial | false: weights stay valid when evaluated at a different
+#                      mesh/grid/point resolution than training.
+#   boundary_conditions  Optional. hard_dirichlet when the ansatz satisfies Dirichlet BCs exactly;
+#                      omitted means BCs are learned from inputs or penalised in the loss.
 #   docs, examples     Optional extra paths; docs/<name>.md and examples/**/*<name>*.py are auto-discovered.
 #   registry_name      Only for catalog-only variants that reuse another registered model.
 
@@ -56,6 +64,9 @@ models:
     speed: 5
     expressivity: 2
     dynamic_topology: true
+    symmetries: [permutation]
+    receptive_field: {kind: global, note: Global only through the final max-pool; no local context before it.}
+    resolution_transfer: partial
     keywords: [classification, shape, segmentation, baseline, unordered]
 
   pointnet2:
@@ -85,6 +96,9 @@ models:
     speed: 3
     expressivity: 3
     dynamic_topology: true
+    symmetries: [permutation]
+    receptive_field: {kind: global, note: Local detail limited to ball radii; global context via the pooled global feature.}
+    resolution_transfer: partial
     keywords: [segmentation, local, hierarchical, part, classification]
 
   pointnext:
@@ -113,6 +127,9 @@ models:
     speed: 3
     expressivity: 4
     dynamic_topology: true
+    symmetries: [permutation]
+    receptive_field: {kind: global, note: Local detail limited to the scaled ball radii; global context via pooling.}
+    resolution_transfer: partial
     keywords: [classification, segmentation, residual, state-of-the-art]
 
   dgcnn:
@@ -142,6 +159,9 @@ models:
     speed: 2
     expressivity: 4
     dynamic_topology: true
+    symmetries: [permutation]
+    receptive_field: {kind: global, note: k-NN neighbourhoods shrink physically as point density rises; global context via pooling.}
+    resolution_transfer: partial
     keywords: [classification, segmentation, dynamic graph, knn, edge, local geometry]
 
   gcn:
@@ -169,6 +189,9 @@ models:
     speed: 5
     expressivity: 1
     dynamic_topology: true
+    symmetries: [permutation]
+    receptive_field: {kind: hops, depth_key: num_layers}
+    resolution_transfer: false
     docs: [docs/adding_a_network.md]
     keywords: [baseline, node, graph, diffusion, smooth]
 
@@ -196,6 +219,9 @@ models:
     speed: 4
     expressivity: 2
     dynamic_topology: true
+    symmetries: [permutation]
+    receptive_field: {kind: hops, depth_key: num_layers}
+    resolution_transfer: false
     docs: [docs/adding_a_network.md]
     keywords: [attention, node, graph, anisotropic, interpretable]
 
@@ -225,6 +251,9 @@ models:
     speed: 2
     expressivity: 5
     dynamic_topology: true
+    symmetries: [permutation, translation]
+    receptive_field: {kind: hops, depth_key: processor_steps}
+    resolution_transfer: partial
     keywords: [simulation, cfd, cloth, structural, rollout, time, transient, mesh, fluid, deformation]
 
   adaptive_meshgraphnet:
@@ -252,6 +281,9 @@ models:
     speed: 1
     expressivity: 5
     dynamic_topology: true
+    symmetries: [permutation, translation]
+    receptive_field: {kind: hops, depth_key: processor_steps}
+    resolution_transfer: partial
     docs: [docs/meshgraphnet.md]
     examples: [examples/adaptive_meshgraphnet_synthetic.py, tests/test_adaptive_meshgraphnet.py]
     keywords: [adaptive, remeshing, refinement, shock, contact, topology, rollout, transient]
@@ -283,6 +315,9 @@ models:
     speed: 4
     expressivity: 3
     dynamic_topology: partial
+    symmetries: [translation]
+    receptive_field: {kind: conv_grid, depth_key: levels, kernel_key: kernel_size}
+    resolution_transfer: false
     keywords: [voxel, volumetric, segmentation, medical, ct, dense, grid, image]
 
   fno3d:
@@ -313,6 +348,9 @@ models:
     speed: 4
     expressivity: 4
     dynamic_topology: partial
+    symmetries: [translation]
+    receptive_field: {kind: global, note: append_coordinates=True (default) breaks translation equivariance.}
+    resolution_transfer: true
     keywords: [operator, pde, darcy, navier-stokes, heat, parametric, super-resolution, spectral, periodic, grid]
 
   gino:
@@ -339,6 +377,9 @@ models:
     speed: 3
     expressivity: 4
     dynamic_topology: true
+    symmetries: [permutation]
+    receptive_field: {kind: global}
+    resolution_transfer: true
     keywords: [operator, irregular, geometry, aerodynamics, car, pressure, query, pde, cfd]
 
   transolver:
@@ -368,6 +409,9 @@ models:
     speed: 3
     expressivity: 5
     dynamic_topology: true
+    symmetries: [permutation]
+    receptive_field: {kind: global}
+    resolution_transfer: true
     keywords: [operator, pde, transformer, attention, irregular, airfoil, elasticity, cfd, global]
 
   siren:
@@ -396,6 +440,9 @@ models:
     speed: 5
     expressivity: 3
     dynamic_topology: false
+    symmetries: []
+    receptive_field: {kind: pointwise}
+    resolution_transfer: true
     keywords: [implicit, sdf, pinn, coordinate, continuous, derivative, high-frequency, neural field]
 
   mlp:
@@ -422,6 +469,9 @@ models:
     speed: 5
     expressivity: 1
     dynamic_topology: false
+    symmetries: []
+    receptive_field: {kind: pointwise}
+    resolution_transfer: true
     keywords: [pinn, baseline, coordinate, smooth, continuous]
 
   deep_nurbs:
@@ -447,4 +497,8 @@ models:
     speed: 5
     expressivity: 2
     dynamic_topology: false
+    symmetries: []
+    receptive_field: {kind: pointwise}
+    resolution_transfer: true
+    boundary_conditions: hard_dirichlet
     keywords: [nurbs, cad, isogeometric, boundary condition, pinn, surface, parametric]

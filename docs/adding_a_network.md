@@ -110,7 +110,7 @@ When adding a model, include tests for:
 The repository contains a small infrastructure test suite covering these conditions.
 
 Also add an entry to `tools/mcp_advisor/catalog.yaml` (complexity, memory model,
-merits, demerits) and document the model in `docs/<model_name>.md`.
+merits, demerits, symmetries, receptive field, resolution transfer) and document the model in `docs/<model_name>.md`.
 `tests/test_advisor_mcp.py` fails while a registered model has no catalog entry;
 see [tools/mcp_advisor/README.md](../tools/mcp_advisor/README.md).
 

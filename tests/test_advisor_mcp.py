@@ -226,6 +226,14 @@ def test_mcp_server_exposes_tools():
         "recommend_architecture",
         "estimate_resource_footprint",
         "refresh_model_catalog",
+        "audit_problem_assumptions",
+        "check_symmetry_and_invariance",
+        "recommend_representation_pipeline",
+        "calculate_effective_receptive_field",
+        "recommend_batching_strategy",
+        "estimate_training_budget",
+        "generate_benchmark_config",
+        "suggest_ablation_matrix",
     }
     result = asyncio.run(server.server.call_tool("get_model_dossier", {"model_name": "siren"}))
     assert "SIREN" in str(result)

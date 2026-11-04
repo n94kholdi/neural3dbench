@@ -50,6 +50,18 @@ python /abs/path/to/Neural3DBench/tools/mcp_advisor/server.py   # from anywhere
 | `recommend_architecture` | `problem_description`, `input_format`, `max_elements_per_sample`, `dynamic_topology=False`, `target_metric="accuracy"` | Ranked models with score, rationale, pitfalls, estimated VRAM and hardware tier |
 | `estimate_resource_footprint` | `model_name`, `num_elements`, `batch_size=1`, `precision="fp32"` | Training and inference memory, hardware tier, scaling when N doubles, assumptions |
 | `refresh_model_catalog` | none | Sync report: added/removed models, uncurated models, models without docs, import errors |
+| `audit_problem_assumptions` | `problem_description`, `model_name=None`, `boundary_conditions="none"`, `topology_changes=False`, `geometry_varies=False`, `evaluate_at_unseen_resolution=False` | Per-model findings (BC enforcement, topology, per-instance fitting, resolution transfer, FFT periodicity) and the models without errors |
+| `check_symmetry_and_invariance` | `model_name`, `required_symmetries`, `target_kind="scalar"`, `uses_absolute_coordinates=True` | Per-symmetry verdict (permutation, translation, rotation) and the fix; vector/tensor targets are told they need equivariance |
+| `recommend_representation_pipeline` | `raw_format`, `target_model`, `watertight=None`, `voxel_resolution=64` | Conversion steps using the repository converters and adapters, with voxelisation and connectivity warnings |
+| `calculate_effective_receptive_field` | `model_name`, `depth=None`, `element_spacing=None`, `interaction_length=None` | Reach in hops/voxels and physical units; warning when it is shorter than the coupling length |
+| `recommend_batching_strategy` | `model_name`, `num_elements`, `vram_budget_gb`, `target_effective_batch=16`, `variable_size=True` | Micro-batch, gradient accumulation, fp32/bf16 choice, collation (block-diagonal graphs, padded points) |
+| `estimate_training_budget` | `model_name`, `num_elements`, `dataset_size`, `epochs`, `target_gpu="A100"`, `precision="fp32"` | Wall-clock hours with a 0.5x-4x range (H100, A100, RTX4090, V100, T4) |
+| `generate_benchmark_config` | `model_name`, `dataset_name`, `num_elements`, `hardware_target="A100"`, `dataset_size=1000`, `epochs=100` | YAML config and a `ModelRegistry.create()` launcher with batch, precision and optimizer filled in |
+| `suggest_ablation_matrix` | `primary_model`, `max_contenders=4` | Baselines with the role each plays (simpler model, other interaction mechanism, other representation) |
+
+The guardrail tools read four extra catalog fields: `symmetries`, `receptive_field`,
+`resolution_transfer` and the optional `boundary_conditions`. Training time treats a
+step as memory-bandwidth bound and is not calibrated on real GPUs; time a pilot epoch.
 
 Vocabulary:
 
