@@ -2,10 +2,12 @@ from .base import BaseNetwork
 from .configs import BaseModelConfig
 from .deep_nurbs import DeepNURBS, DeepNURBSConfig
 from .dgcnn import DGCNN, DGCNNConfig
+from .foldingnet import FoldingNet, FoldingNetConfig
 from .fno import FNO3D, FNO3DConfig, SpectralConv3d
 from .gino import GINO, GINOConfig
 from .graph import GAT, GATConfig, GCN, GCNConfig, MeshGraphNet, MeshGraphNetConfig
 from .mlp import MLP, MLPConfig
+from .pcn import PCN, PCNConfig
 from .pointnet import PointNet, PointNetConfig
 from .pointnet2 import PointNet2, PointNet2Config
 from .pointnext import PointNeXt, PointNeXtConfig
@@ -31,6 +33,8 @@ __all__ = [
     "DeepNURBSConfig",
     "DGCNN",
     "DGCNNConfig",
+    "FoldingNet",
+    "FoldingNetConfig",
     "FNO3D",
     "FNO3DConfig",
     "GINO",
@@ -51,6 +55,8 @@ __all__ = [
     "MeshGraphNetConfig",
     "MLP",
     "MLPConfig",
+    "PCN",
+    "PCNConfig",
     "PointNet",
     "PointNetConfig",
     "PointNet2",

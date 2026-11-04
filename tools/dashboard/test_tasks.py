@@ -85,3 +85,21 @@ def test_evaluation_figures() -> None:
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
+
+
+def test_partial_shapes_and_chamfer() -> None:
+    partial, full = tasks.make_dataset("partial_shapes", 4, 128)
+    assert partial.shape == full.shape == (4, 128, 3)
+    assert tasks.chamfer_distance(full, full).item() == pytest.approx(0.0, abs=1e-5)
+    assert tasks.chamfer_distance(partial, full).item() > 0.01  # a side is missing
+    pred = torch.zeros(4, 10, 3, requires_grad=True)
+    tasks.chamfer_distance(pred, full).backward()
+    assert torch.isfinite(pred.grad).all()
+    assert tasks.dataset_for_problem("shape_completion") == "partial_shapes"
+
+
+def test_completion_mismatch() -> None:
+    assert tasks.input_mismatch("pcn", "partial_shapes") is None
+    assert tasks.input_mismatch("foldingnet", "chair_parts")
+    assert tasks.input_mismatch("pointnet", "partial_shapes")
+    assert tasks.input_mismatch("pointnet", "chair_parts") is None

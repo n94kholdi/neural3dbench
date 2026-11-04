@@ -10,10 +10,12 @@ task                 target                       loss                    metric
 field_regression     float ``[B, N, C]``          MSE                     MAE
 part_segmentation    int part id ``[B, N]``       per-point cross-entropy accuracy, mIoU
 shape_classification int class id ``[B]``         cross-entropy           accuracy
+shape_completion     complete cloud ``[B, N, 3]``  Chamfer (squared L2)    Chamfer
 ==================== ============================ ======================= =====================
 
 Per-point models without a global head (mlp, siren, ...) are mean-pooled over points for
-shape classification.
+shape classification. Completion models (pcn, foldingnet) take the partial cloud and return a
+new point set ``[B, M, 3]``; M need not equal N.
 """
 
 from __future__ import annotations
@@ -37,7 +39,8 @@ from models import ModelInput, ModelOutput, ModelRegistry
 FIELD_REGRESSION = "field_regression"
 PART_SEGMENTATION = "part_segmentation"
 SHAPE_CLASSIFICATION = "shape_classification"
-TASKS = (FIELD_REGRESSION, PART_SEGMENTATION, SHAPE_CLASSIFICATION)
+SHAPE_COMPLETION = "shape_completion"
+TASKS = (FIELD_REGRESSION, PART_SEGMENTATION, SHAPE_CLASSIFICATION, SHAPE_COMPLETION)
 
 Generator = Callable[[int, int, torch.Generator], tuple[torch.Tensor, torch.Tensor]]
 
@@ -138,6 +141,20 @@ def _primitive_shapes(num_samples: int, num_points: int, generator: torch.Genera
     return clouds + 0.02 * torch.randn(clouds.shape, generator=generator), labels
 
 
+def _partial_shapes(num_samples: int, num_points: int, generator: torch.Generator) -> tuple[torch.Tensor, torch.Tensor]:
+    """Primitive shapes cut by a random plane (the 40% highest along a random direction is removed).
+
+    Returns the partial cloud resampled to ``num_points`` and the complete cloud ``[B, N, 3]`` as target.
+    """
+    full, _ = _primitive_shapes(num_samples, num_points, generator)
+    direction = torch.randn(num_samples, 1, 3, generator=generator)
+    height = (full * direction).sum(-1)
+    kept = height.argsort(dim=1)[:, : max(1, int(0.6 * num_points))]
+    pick = torch.randint(0, kept.shape[1], (num_samples, num_points), generator=generator)
+    partial = full.gather(1, kept.gather(1, pick).unsqueeze(-1).expand(-1, -1, 3))
+    return partial, full
+
+
 DATASETS: dict[str, Dataset] = {
     d.name: d
     for d in (
@@ -149,6 +166,8 @@ DATASETS: dict[str, Dataset] = {
                 _chair_parts, class_names=CHAIR_PARTS),
         Dataset("primitive_shapes", SHAPE_CLASSIFICATION, "Noisy sphere / cube / cylinder clouds; classify the shape.",
                 _primitive_shapes, class_names=PRIMITIVES),
+        Dataset("partial_shapes", SHAPE_COMPLETION, "Primitive shapes with a random side cut away; complete the cloud.",
+                _partial_shapes),
     )
 }
 
@@ -299,6 +318,8 @@ def make_dataset(name: str, num_samples: int, num_points: int, seed: int = 0) ->
 def dataset_for_problem(advisor_task: str, description: str = "") -> str:
     """Pick the synthetic dataset that matches an advisor task domain and free-text description."""
     text = description.lower()
+    if advisor_task == "shape_completion":
+        return "partial_shapes"
     if advisor_task == "segmentation_classification":
         if "classif" in text and "segment" not in text:
             return "primitive_shapes"
@@ -318,8 +339,22 @@ def head_config(model_name: str, dataset: Dataset) -> dict[str, Any]:
     return {k: v for k, v in head.items() if k in accepted}
 
 
-def input_mismatch(model_name: str) -> str | None:
-    """Why ``model_name`` cannot train on these datasets (they only provide ``coordinates [B, N, 3]``), or None."""
+def generates_points(model_name: str) -> bool:
+    """True for models that output a new point set (their config has ``num_output_points``)."""
+    return hasattr(ModelRegistry.get_config_class(model_name), "num_output_points")
+
+
+def input_mismatch(model_name: str, dataset_name: str | None = None) -> str | None:
+    """Why ``model_name`` cannot train on these datasets (they only provide ``coordinates [B, N, 3]``), or None.
+
+    With ``dataset_name``, also reject a completion model on a per-point dataset and the reverse.
+    """
+    if dataset_name is not None:
+        completion = DATASETS[dataset_name].task == SHAPE_COMPLETION
+        if generates_points(model_name) != completion:
+            if completion:
+                return f"`{dataset_name}` is shape completion; train it with a completion model (pcn, foldingnet)."
+            return f"`{model_name}` outputs a new point set; train it on a shape-completion dataset (partial_shapes)."
     capabilities = ModelRegistry.create(model_name).capabilities
     extra = sorted(set(capabilities.requires) - {"coordinates"})
     if capabilities.representation == "POINT_CLOUD" and not extra:
@@ -334,6 +369,8 @@ def forward(task: str, model: nn.Module, coords: torch.Tensor) -> torch.Tensor:
     """Run the model; returns ``[B, C]`` logits for shape classification, else ``[B, N, C]``."""
     output = model(ModelInput(coordinates=coords))
     predictions = output.predictions if isinstance(output, ModelOutput) else output
+    if task == SHAPE_COMPLETION:
+        return predictions  # [B, M, 3], M set by the model
     if task == SHAPE_CLASSIFICATION:
         if predictions.ndim == 3:  # per-point model: pool the point logits into one shape logit
             predictions = predictions.mean(dim=1)
@@ -341,7 +378,18 @@ def forward(task: str, model: nn.Module, coords: torch.Tensor) -> torch.Tensor:
     return predictions.reshape(coords.shape[0], coords.shape[1], -1)
 
 
+def chamfer_distance(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    """Symmetric squared-L2 Chamfer distance between ``[B, M, 3]`` and ``[B, N, 3]``, averaged over the batch."""
+    # Expanded form avoids torch.cdist's NaN gradient at zero distance.
+    sq = (pred.pow(2).sum(-1, keepdim=True) + target.pow(2).sum(-1).unsqueeze(1)
+          - 2 * pred @ target.transpose(1, 2)).clamp_min(0)  # [B, M, N]
+    return sq.min(2).values.mean() + sq.min(1).values.mean()
+
+
 def loss(task: str, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    if task == SHAPE_COMPLETION:
+        # shortcut: no Chamfer term on PCN's coarse output (paper uses one); add it if PCN converges slowly.
+        return chamfer_distance(pred, target)
     if task == FIELD_REGRESSION:
         return F.mse_loss(pred, target)
     return F.cross_entropy(pred.reshape(-1, pred.shape[-1]), target.reshape(-1))
@@ -361,6 +409,8 @@ def mean_iou(pred_labels: torch.Tensor, target: torch.Tensor, num_classes: int) 
 def metrics(task: str, pred: torch.Tensor, target: torch.Tensor, num_classes: int = 0) -> dict[str, float]:
     if task == FIELD_REGRESSION:
         return {"mae": (pred - target).abs().mean().item()}
+    if task == SHAPE_COMPLETION:
+        return {"chamfer": chamfer_distance(pred, target).item()}
     labels = pred.argmax(-1)
     result = {"accuracy": (labels == target).float().mean().item()}
     if task == PART_SEGMENTATION:
@@ -375,6 +425,8 @@ def evaluation_figure(dataset: Dataset, coords: Any, target: Any, pred: Any) -> 
     pred = torch.as_tensor(pred)
     if dataset.task == FIELD_REGRESSION:
         return visualizer.plot_field_comparison(coords, None, target, pred, dataset.field_name)
+    if dataset.task == SHAPE_COMPLETION:
+        return visualizer.plot_completion_comparison(coords, target, pred)
     if dataset.task == PART_SEGMENTATION:
         return visualizer.plot_segmentation_comparison(coords, target, pred.argmax(-1), dataset.class_names,
                                                        dataset.class_colors)

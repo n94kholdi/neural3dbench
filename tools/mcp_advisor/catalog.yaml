@@ -12,6 +12,7 @@
 #   representations    Native inputs: point_cloud | mesh_graph | voxel_grid | continuous_coords
 #   also_accepts       {representation: conversion note} for inputs usable after conversion.
 #   tasks              surrogate_simulation | pde_operator | segmentation_classification | field_fitting
+#                      | shape_completion
 #   element            What num_elements counts for this model (point, node, voxel, ...).
 #   inductive_biases, merits, demerits: lists of short statements.
 #   complexity         time / memory Big-O strings plus notes (N = elements per sample).
@@ -502,3 +503,68 @@ models:
     resolution_transfer: true
     boundary_conditions: hard_dirichlet
     keywords: [nurbs, cad, isogeometric, boundary condition, pinn, surface, parametric]
+
+  pcn:
+    display_name: PCN (Point Completion Network)
+    paradigm: Two stacked PointNets to a global code, an MLP for coarse points, then folding of a 2D patch around each coarse point.
+    representations: [point_cloud]
+    also_accepts:
+      mesh_graph: Use mesh vertices (or surface samples) as the partial cloud; connectivity is ignored.
+    tasks: [shape_completion]
+    element: point
+    inductive_biases:
+      - Permutation invariance through max pooling; the whole shape is summarised in one global code.
+      - Coarse-to-fine - global structure first, then local 2D patches assumed to lie on a smooth surface.
+      - Output size is fixed by the config (num_coarse * grid_size^2), independent of the input size.
+    merits:
+      - Standard completion baseline; robust to heavy occlusion and varying partial point counts.
+      - Linear encoder cost in N; handles padded batches via point_mask.
+      - Coarse output gives an extra supervision signal and a quick structural preview.
+    demerits:
+      - Global code limits fine detail; thin parts and sharp edges blur.
+      - Coarse MLP output layer scales with num_coarse (3 * num_coarse * 1024 weights).
+      - Needs a Chamfer/EMD loss and complete target shapes for training.
+    complexity:
+      time: O(N + M)
+      memory: O(N + M)
+      notes: N = input points, M = num_coarse * grid_size^2 output points (1024 by default); decoder cost dominates.
+    memory_model: {per_element: 1800, per_element_sq: 0, per_sample: 7650000}
+    speed: 4
+    expressivity: 3
+    dynamic_topology: true
+    symmetries: [permutation]
+    receptive_field: {kind: global, note: Every output point sees the global code; no local input context is carried to the decoder.}
+    resolution_transfer: partial
+    keywords: [completion, partial, occlusion, scan, coarse-to-fine, densify, upsample]
+
+  foldingnet:
+    display_name: FoldingNet
+    paradigm: Point-set autoencoder; a global codeword folds a fixed 2D grid onto the surface in two MLP folding steps.
+    representations: [point_cloud]
+    also_accepts:
+      mesh_graph: Use mesh vertices (or surface samples) as the input cloud; connectivity is ignored.
+    tasks: [shape_completion]
+    element: point
+    inductive_biases:
+      - The output is a deformed 2D sheet, so shapes are assumed to be (piecewise) 2-manifold surfaces.
+      - Permutation invariance through max pooling to a single codeword.
+      - Output size is fixed by grid_size^2, independent of the input size.
+    merits:
+      - Light (about 1M parameters at defaults) and fast; good unsupervised shape features.
+      - Smooth, evenly spread outputs from the grid parametrisation.
+    demerits:
+      - A single sheet struggles with complex topology (holes, disconnected parts).
+      - Encoder here is PointNet-style, not the paper's k-NN graph encoder; less local detail.
+      - Weaker completion accuracy than coarse-to-fine decoders such as PCN.
+    complexity:
+      time: O(N + M)
+      memory: O(N + M)
+      notes: N = input points, M = grid_size^2 output points (1024 by default); decoder cost dominates.
+    memory_model: {per_element: 400, per_element_sq: 0, per_sample: 6380000}
+    speed: 5
+    expressivity: 2
+    dynamic_topology: true
+    symmetries: [permutation]
+    receptive_field: {kind: global, note: Every output point sees only the global codeword.}
+    resolution_transfer: partial
+    keywords: [completion, autoencoder, reconstruction, folding, unsupervised, upsample]

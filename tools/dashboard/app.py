@@ -31,10 +31,9 @@ REPRESENTATIONS = {
     "voxel_grid": "Voxel grid",
     "continuous_coords": "Continuous fields (coordinates)",
 }
-TASKS = ("surrogate_simulation", "pde_operator", "segmentation_classification", "field_fitting")
+TASKS = ("surrogate_simulation", "pde_operator", "segmentation_classification", "field_fitting", "shape_completion")
 # Not covered by any registered model yet; listed so the advisor can say so (tools/mcp_advisor/advisor.py).
-UNCOVERED_TASKS = ("object_detection", "instance_segmentation", "shape_completion", "shape_generation",
-                   "registration", "scene_flow")
+UNCOVERED_TASKS = ("object_detection", "instance_segmentation", "shape_generation", "registration", "scene_flow")
 PRECISIONS = ("fp32", "fp16", "bf16", "amp")
 POLL_SECONDS = 2.0
 _VERTEX_KEYS = ("vertices", "coords", "coordinates", "points", "pos")
@@ -325,8 +324,8 @@ def main() -> None:
         return load_sample(name, num_points)
 
     @st.cache_data(show_spinner=False)
-    def cached_input_mismatch(model_name: str) -> str | None:
-        return input_mismatch(model_name)
+    def cached_input_mismatch(model_name: str, dataset_name: str) -> str | None:
+        return input_mismatch(model_name, dataset_name)
 
     @st.cache_data(show_spinner="Running the model on the validation sample...")
     def cached_prediction(checkpoint_path: str, config_json: str, sample: int) -> tuple[np.ndarray, ...]:
@@ -581,7 +580,7 @@ def main() -> None:
         st.caption(f"**{chosen.task.replace('_', ' ')}**: {chosen.description}"
                    + (f" Classes: {', '.join(chosen.class_names)}." if chosen.class_names else "")
                    + " The model head (`output_dim`, `task`) is sized from the dataset; JSON overrides win.")
-        mismatch = cached_input_mismatch(st.session_state["train_model"])
+        mismatch = cached_input_mismatch(st.session_state["train_model"], chosen.name)
         if mismatch:
             st.warning(mismatch)
         problem = st.session_state.get("problem_dataset")

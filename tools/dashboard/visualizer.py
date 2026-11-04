@@ -240,3 +240,18 @@ def plot_segmentation_comparison(
         uirevision="segmentation-comparison",
     )
     return figure
+
+
+def plot_completion_comparison(partial: Any, target: Any, pred: Any) -> go.Figure:
+    """1x3 subplots: partial input ``[N, 3]``, complete ground truth ``[N, 3]`` and predicted completion ``[M, 3]``."""
+    clouds = [_coords(partial, "partial"), _coords(target, "target"), _coords(pred, "pred")]
+    figure = make_subplots(rows=1, cols=3, specs=[[{"type": "scene"}] * 3], horizontal_spacing=0.02,
+                           subplot_titles=("Partial input", "Ground truth", "Predicted completion"))
+    for col, (points, color) in enumerate(zip(clouds, ("gray", "seagreen", "royalblue")), 1):
+        points = points[downsample_points(len(points))]
+        figure.add_trace(go.Scatter3d(x=points[:, 0], y=points[:, 1], z=points[:, 2], mode="markers",
+                                      marker={"size": 2, "color": color}, showlegend=False), 1, col)
+    scene = _scene()
+    figure.update_layout(scene=scene, scene2=scene, scene3=scene, title="Shape completion",
+                         margin={"l": 0, "r": 0, "t": 60, "b": 0}, uirevision="completion-comparison")
+    return figure

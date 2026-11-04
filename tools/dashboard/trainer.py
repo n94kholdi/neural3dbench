@@ -221,7 +221,7 @@ class Trainer:
         if isinstance(config, dict):
             config = TrainingConfig(**config)
         ModelRegistry.get(config.model_name)  # fail fast on unknown model, before the thread starts
-        mismatch = tasks.input_mismatch(config.model_name)
+        mismatch = tasks.input_mismatch(config.model_name, config.dataset)
         if mismatch:
             raise ValueError(mismatch.replace("`", ""))
         with self._lock:

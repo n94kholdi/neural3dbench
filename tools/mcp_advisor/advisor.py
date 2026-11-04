@@ -21,7 +21,7 @@ CATALOG_PATH = Path(__file__).with_name("catalog.yaml")
 INTROSPECT_SCRIPT = Path(__file__).with_name("_introspect.py")
 
 REPRESENTATIONS = ("point_cloud", "mesh_graph", "voxel_grid", "continuous_coords")
-TASKS = ("surrogate_simulation", "pde_operator", "segmentation_classification", "field_fitting")
+TASKS = ("surrogate_simulation", "pde_operator", "segmentation_classification", "field_fitting", "shape_completion")
 REQUIRED_CATALOG_FIELDS = (
     "display_name",
     "paradigm",
@@ -66,6 +66,7 @@ _TASK_KEYWORDS = {
     "pde_operator": ("pde", "operator", "solver", "darcy", "navier", "poisson", "parametric", "super-resolution"),
     "surrogate_simulation": ("simulat", "surrogate", "cfd", "fea", "fem", "rollout", "transient", "dynamics", "time-step"),
     "field_fitting": ("pinn", "implicit", "sdf", "fit", "neural field", "reconstruct"),
+    "shape_completion": ("complet", "partial scan", "missing part", "upsampl", "densif"),
 }
 
 # Capabilities no catalog task covers. A catalog entry may list one of these keys under ``tasks``
@@ -84,14 +85,6 @@ MISSING_CAPABILITIES = {
         "needs": "A separate id per object instance, not only per class: offset/embedding head and clustering.",
         "suggested_networks": [
             {"name": "PointGroup", "why": "Semantic + center-offset branches, clustered into instances.", "reference": "https://arxiv.org/abs/2004.01658"},
-        ],
-    },
-    "shape_completion": {
-        "keywords": ("complet", "partial scan", "missing part", "upsampl", "densif"),
-        "needs": "Outputs a new point set, not values on the input points: a decoder and a Chamfer/EMD loss.",
-        "suggested_networks": [
-            {"name": "PCN", "why": "Coarse-to-fine completion decoder; the standard baseline.", "reference": "https://arxiv.org/abs/1808.00671"},
-            {"name": "FoldingNet", "why": "Folds a 2D grid onto the surface; light autoencoder.", "reference": "https://arxiv.org/abs/1712.07262"},
         ],
     },
     "shape_generation": {

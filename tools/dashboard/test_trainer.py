@@ -107,3 +107,24 @@ def test_failed_run_reports_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
+
+
+@pytest.mark.parametrize(("model_name", "model_config"), [
+    ("pcn", {"latent_dim": 64, "hidden_dim": 32, "num_coarse": 16, "grid_size": 2}),
+    ("foldingnet", {"latent_dim": 64, "hidden_dim": 32, "grid_size": 6}),
+])
+def test_completion_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, model_name: str, model_config: dict) -> None:
+    monkeypatch.chdir(tmp_path)
+    trainer = Trainer()
+    trainer.start_training({"model_name": model_name, "model_config": model_config, "dataset": "partial_shapes",
+                            "epochs": 2, "batch_size": 4, "num_samples": 12, "num_points": 64,
+                            "experiment_name": "test-completion"})
+    status = trainer.wait(timeout=120)
+    assert status["status"] == "completed", status["error"]
+    assert status["val_loss"] is not None
+
+
+def test_completion_model_rejects_field_dataset(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(ValueError, match="shape-completion"):
+        Trainer().start_training({"model_name": "pcn", "dataset": "deformed_sphere"})
