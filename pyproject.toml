@@ -30,6 +30,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dashboard = [
+  "streamlit>=1.37",
   "mlflow>=2.10",
   "plotly>=5.0.0",
   "pyyaml>=6.0",

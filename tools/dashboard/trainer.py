@@ -251,6 +251,11 @@ class Trainer:
             worker.stop_event.set()
             worker.join(timeout)
 
+    @property
+    def config(self) -> TrainingConfig | None:
+        """Config of the latest run (running or finished), or ``None`` before the first run."""
+        return self._worker.config if self._worker is not None else None
+
     def get_status(self) -> dict[str, Any]:
         """Snapshot copy of the run state; safe to call from any thread."""
         with self._lock:
