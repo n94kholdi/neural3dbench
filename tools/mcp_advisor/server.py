@@ -17,6 +17,7 @@ try:
 except ImportError:
     from mcp.server.fastmcp import FastMCP as _Server  # mcp 1.x
 
+from tools.mcp_advisor import guardrails
 from tools.mcp_advisor.advisor import Advisor
 
 advisor = Advisor()
@@ -26,7 +27,8 @@ server = _Server(
         "Decision support for Neural3DBench 3D architectures. Models are discovered live from "
         "models.ModelRegistry, docs/ and tools/mcp_advisor/catalog.yaml. Representations: point_cloud, "
         "mesh_graph, voxel_grid, continuous_coords. Tasks: surrogate_simulation, pde_operator, "
-        "segmentation_classification, field_fitting. Memory figures are heuristics."
+        "segmentation_classification, field_fitting. Memory and time figures are heuristics. "
+        "Before training, run audit_problem_assumptions and check_symmetry_and_invariance."
     ),
 )
 
@@ -79,6 +81,120 @@ def estimate_resource_footprint(
     precision: fp32 | fp16 | bf16 | amp
     """
     return advisor.estimate_resource_footprint(model_name, num_elements, batch_size, precision)
+
+
+@server.tool()
+def audit_problem_assumptions(
+    problem_description: str,
+    model_name: str | None = None,
+    boundary_conditions: str = "none",
+    topology_changes: bool = False,
+    geometry_varies: bool = False,
+    evaluate_at_unseen_resolution: bool = False,
+) -> dict:
+    """Flag unhandled boundary conditions, topology/geometry changes and resolution transfer.
+
+    boundary_conditions: none | dirichlet | neumann | mixed
+    Without model_name every model is audited and the error-free ones are listed.
+    """
+    return guardrails.audit_problem_assumptions(
+        advisor, problem_description, model_name, boundary_conditions,
+        topology_changes, geometry_varies, evaluate_at_unseen_resolution,
+    )
+
+
+@server.tool()
+def check_symmetry_and_invariance(
+    model_name: str,
+    required_symmetries: list[str],
+    target_kind: str = "scalar",
+    uses_absolute_coordinates: bool = True,
+) -> dict:
+    """Compare required symmetries with those the architecture guarantees.
+
+    required_symmetries: subset of permutation | translation | rotation
+    target_kind: scalar | vector | tensor (vectors/tensors need equivariance, not invariance)
+    """
+    return guardrails.check_symmetry_and_invariance(
+        advisor, model_name, required_symmetries, target_kind, uses_absolute_coordinates
+    )
+
+
+@server.tool()
+def recommend_representation_pipeline(
+    raw_format: str, target_model: str, watertight: bool | None = None, voxel_resolution: int = 64
+) -> dict:
+    """Conversion steps from a raw format (step, stl, msh, xyz, npy, nurbs, ...) to the model's ModelInput."""
+    return guardrails.recommend_representation_pipeline(
+        advisor, raw_format, target_model, watertight, voxel_resolution
+    )
+
+
+@server.tool()
+def calculate_effective_receptive_field(
+    model_name: str,
+    depth: int | None = None,
+    element_spacing: float | None = None,
+    interaction_length: float | None = None,
+) -> dict:
+    """Reach of one forward pass vs the physical coupling length.
+
+    depth: layers/steps (default from the model config); element_spacing: mean edge length or voxel
+    size; interaction_length: distance the physics couples over, same units.
+    """
+    return guardrails.calculate_effective_receptive_field(
+        advisor, model_name, depth, element_spacing, interaction_length
+    )
+
+
+@server.tool()
+def recommend_batching_strategy(
+    model_name: str,
+    num_elements: int,
+    vram_budget_gb: float,
+    target_effective_batch: int = 16,
+    variable_size: bool = True,
+) -> dict:
+    """Micro-batch, gradient accumulation, precision and collation (graph block-diagonal vs point padding)."""
+    return guardrails.recommend_batching_strategy(
+        advisor, model_name, num_elements, vram_budget_gb, target_effective_batch, variable_size
+    )
+
+
+@server.tool()
+def estimate_training_budget(
+    model_name: str,
+    num_elements: int,
+    dataset_size: int,
+    epochs: int,
+    target_gpu: str = "A100",
+    precision: str = "fp32",
+) -> dict:
+    """Rough wall-clock training time. target_gpu: H100 | A100 | RTX4090 | V100 | T4"""
+    return guardrails.estimate_training_budget(
+        advisor, model_name, num_elements, dataset_size, epochs, target_gpu, precision
+    )
+
+
+@server.tool()
+def generate_benchmark_config(
+    model_name: str,
+    dataset_name: str,
+    num_elements: int,
+    hardware_target: str = "A100",
+    dataset_size: int = 1000,
+    epochs: int = 100,
+) -> dict:
+    """YAML config and Python launcher (ModelRegistry.create) with batch, precision and optimizer filled in."""
+    return guardrails.generate_benchmark_config(
+        advisor, model_name, dataset_name, num_elements, hardware_target, dataset_size, epochs
+    )
+
+
+@server.tool()
+def suggest_ablation_matrix(primary_model: str, max_contenders: int = 4) -> dict:
+    """Baseline contenders that isolate the primary model's architectural contribution."""
+    return guardrails.suggest_ablation_matrix(advisor, primary_model, max_contenders)
 
 
 @server.tool()
