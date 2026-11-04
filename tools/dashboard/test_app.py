@@ -85,7 +85,7 @@ def test_advisor_task_reaches_training_tab(tmp_path: Path, monkeypatch: pytest.M
     app.button(key=f"use_{top}").click().run()
     assert app.session_state["train_model"] == top
     assert app.session_state["train_dataset"] == "chair_parts"
-    assert not app.warning, [w.value for w in app.warning]
+    assert not [w.value for w in app.warning if "advisor problem" in w.value]
 
     app.selectbox(key="train_dataset").set_value("poisson").run()
     assert any("part segmentation" in w.value for w in app.warning)

@@ -241,6 +241,19 @@ def config_from_form(state: Any) -> Any:
     )
 
 
+def default_device() -> str:
+    return "cuda" if torch.cuda.is_available() else "cpu"
+
+
+def cuda_problem() -> str | None:
+    """A message when the driver sees an NVIDIA GPU but CUDA cannot initialize; None otherwise."""
+    if torch.cuda.is_available() or torch.cuda.device_count() == 0:
+        return None
+    return ("An NVIDIA GPU is present but CUDA failed to initialize, so training runs on the CPU. This often "
+            "happens after suspend/resume. Stop this app, run `sudo rmmod nvidia_uvm && sudo modprobe nvidia_uvm` "
+            "(or reboot), then start the dashboard again.")
+
+
 def mlflow_client(tracking_uri: str) -> Any:
     from mlflow.tracking import MlflowClient
 
@@ -321,7 +334,7 @@ def main() -> None:
 
     bridge, trainer = get_bridge(), get_trainer()
     model_names = sorted(ModelRegistry._registry)
-    for key, value in form_values(TrainingConfig()).items():
+    for key, value in form_values(TrainingConfig(device=default_device())).items():
         st.session_state.setdefault(key, value)
 
     def use_model(name: str) -> None:
@@ -584,6 +597,9 @@ def main() -> None:
             if st.session_state["train_device"] not in devices:
                 st.session_state["train_device"] = "cpu"
             a4.selectbox("Device", devices, key="train_device", disabled=running)
+        gpu_problem = cuda_problem()
+        if gpu_problem:
+            st.warning(gpu_problem)
             st.text_area("Model config overrides (JSON)", key="train_model_config", disabled=running,
                          help='Passed to ModelRegistry.create, e.g. {"widths": [64, 64]}.')
 
