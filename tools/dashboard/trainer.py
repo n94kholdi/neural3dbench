@@ -11,14 +11,14 @@ Usage::
     trainer.get_status()  # {"status": "training", "current_epoch": 2, ...}
     trainer.stop_training()
 
-Synthetic datasets (no files needed) feed ``ModelInput(coordinates=[B, N, 3])`` with a
-target field ``[B, N, 1]``, so they suit point/coordinate models (mlp, siren, pointnet, ...).
+Synthetic datasets (no files needed, see ``tools.dashboard.tasks.DATASETS``) feed
+``ModelInput(coordinates=[B, N, 3])``. The dataset's task sets the model head, loss and
+metrics: field regression, part segmentation or shape classification.
 """
 
 from __future__ import annotations
 
 import copy
-import math
 import os
 import tempfile
 import threading
@@ -31,7 +31,8 @@ import mlflow
 import torch
 from torch import nn
 
-from models import ModelInput, ModelOutput, ModelRegistry
+from models import ModelRegistry
+from tools.dashboard import tasks
 
 STATUSES = ("idle", "training", "completed", "failed")
 _OPTIMIZERS = {"adam": torch.optim.Adam, "adamw": torch.optim.AdamW, "sgd": torch.optim.SGD}
@@ -43,7 +44,7 @@ class TrainingConfig:
 
     model_name: str = "mlp"
     model_config: dict[str, Any] = field(default_factory=dict)
-    dataset: str = "deformed_sphere"  # or "poisson"
+    dataset: str = "deformed_sphere"  # a key of tasks.DATASETS
     epochs: int = 10
     batch_size: int = 8
     learning_rate: float = 1e-3
@@ -58,8 +59,8 @@ class TrainingConfig:
     device: str = "cpu"
 
     def __post_init__(self) -> None:
-        if self.dataset not in SYNTHETIC_DATASETS:
-            raise ValueError(f"dataset must be one of {sorted(SYNTHETIC_DATASETS)}; got {self.dataset!r}.")
+        if self.dataset not in tasks.DATASETS:
+            raise ValueError(f"dataset must be one of {sorted(tasks.DATASETS)}; got {self.dataset!r}.")
         if self.optimizer.lower() not in _OPTIMIZERS:
             raise ValueError(f"optimizer must be one of {sorted(_OPTIMIZERS)}; got {self.optimizer!r}.")
         for name in ("epochs", "batch_size", "num_samples", "num_points"):
@@ -71,33 +72,15 @@ class TrainingConfig:
             raise ValueError("learning_rate must be positive.")
 
 
-# ---------------------------------------------------------------- synthetic data
-
-
-def _deformed_sphere(num_samples: int, num_points: int, generator: torch.Generator) -> tuple[torch.Tensor, torch.Tensor]:
-    """Spheres with random low-order radial bumps; target is the radial displacement [B, N, 1]."""
-    direction = torch.randn(num_samples, num_points, 3, generator=generator)
-    direction = direction / direction.norm(dim=-1, keepdim=True)
-    amplitude = 0.2 * torch.rand(num_samples, 1, 3, generator=generator)
-    frequency = torch.randint(1, 4, (num_samples, 1, 3), generator=generator).float()
-    displacement = (amplitude * torch.sin(math.pi * frequency * direction)).sum(-1, keepdim=True)
-    return direction * (1.0 + displacement), displacement
-
-
-def _poisson(num_samples: int, num_points: int, generator: torch.Generator) -> tuple[torch.Tensor, torch.Tensor]:
-    """Manufactured Poisson solution u = prod sin(k_i pi x_i) on [0, 1]^3 (-lap u = pi^2 |k|^2 u)."""
-    coords = torch.rand(num_samples, num_points, 3, generator=generator)
-    k = torch.randint(1, 3, (num_samples, 1, 3), generator=generator).float()
-    return coords, torch.sin(math.pi * k * coords).prod(-1, keepdim=True)
-
-
-SYNTHETIC_DATASETS = {"deformed_sphere": _deformed_sphere, "poisson": _poisson}
-
-
 def make_synthetic_dataset(config: TrainingConfig) -> tuple[torch.Tensor, torch.Tensor]:
-    """Return ``(coordinates [B, N, 3], target [B, N, 1])`` for ``config.dataset``."""
-    generator = torch.Generator().manual_seed(config.seed)
-    return SYNTHETIC_DATASETS[config.dataset](config.num_samples, config.num_points, generator)
+    """Return ``(coordinates [B, N, 3], target)`` for ``config.dataset``; target shape follows its task."""
+    return tasks.make_dataset(config.dataset, config.num_samples, config.num_points, config.seed)
+
+
+def build_model(config: TrainingConfig) -> nn.Module:
+    """Create the model with its head sized for the dataset's task; explicit ``model_config`` keys win."""
+    head = tasks.head_config(config.model_name, tasks.DATASETS[config.dataset])
+    return ModelRegistry.create(config.model_name, {**head, **config.model_config})
 
 
 def _resolve_tracking_uri(uri: str) -> str:
@@ -127,15 +110,12 @@ class TrainingWorker(threading.Thread):
         except Exception as exc:  # surface any failure to the UI instead of dying silently
             self.trainer._update(status="failed", error=f"{exc}\n{traceback.format_exc()}")
 
-    def _forward(self, model: nn.Module, coords: torch.Tensor) -> torch.Tensor:
-        output = model(ModelInput(coordinates=coords))
-        predictions = output.predictions if isinstance(output, ModelOutput) else output
-        return predictions.reshape(coords.shape[0], coords.shape[1], -1)
-
     def _train(self) -> None:
         cfg = self.config
         torch.manual_seed(cfg.seed)
         device = torch.device(cfg.device)
+        dataset = tasks.DATASETS[cfg.dataset]
+        task = dataset.task
         coords, target = make_synthetic_dataset(cfg)
         n_val = max(1, int(round(cfg.num_samples * cfg.val_fraction)))
         if n_val >= cfg.num_samples:
@@ -143,9 +123,8 @@ class TrainingWorker(threading.Thread):
         train_x, val_x = coords[n_val:].to(device), coords[:n_val].to(device)
         train_y, val_y = target[n_val:].to(device), target[:n_val].to(device)
 
-        model = ModelRegistry.create(cfg.model_name, dict(cfg.model_config)).to(device)
+        model = build_model(cfg).to(device)
         optimizer = _OPTIMIZERS[cfg.optimizer.lower()](model.parameters(), lr=cfg.learning_rate)
-        loss_fn = nn.MSELoss()
 
         mlflow.set_tracking_uri(_resolve_tracking_uri(cfg.tracking_uri))
         mlflow.set_experiment(cfg.experiment_name)
@@ -154,6 +133,7 @@ class TrainingWorker(threading.Thread):
             self.trainer._update(run_id=run_id)
             params = {k: v for k, v in asdict(cfg).items() if k != "model_config"}
             params.update({f"model.{k}": v for k, v in asdict(model.config).items()})
+            params.update(task=task, num_classes=dataset.num_classes)
             params["num_parameters"] = sum(p.numel() for p in model.parameters())
             mlflow.log_params({k: str(v)[:500] for k, v in params.items()})
 
@@ -162,41 +142,45 @@ class TrainingWorker(threading.Thread):
                     break
                 model.train()
                 order = torch.randperm(len(train_x), device=device)
-                total = 0.0
+                total, seen = 0.0, 0
                 for start in range(0, len(order), cfg.batch_size):
                     index = order[start : start + cfg.batch_size]
+                    if len(index) == 1 and start:  # BatchNorm cannot train on one sample; drop a 1-sample tail
+                        continue
                     optimizer.zero_grad()
-                    loss = loss_fn(self._forward(model, train_x[index]), train_y[index])
+                    loss = tasks.loss(task, tasks.forward(task, model, train_x[index]), train_y[index])
                     loss.backward()
                     optimizer.step()
                     total += loss.item() * len(index)
-                train_loss = total / len(train_x)
+                    seen += len(index)
+                train_loss = total / seen
 
                 model.eval()
                 with torch.no_grad():
-                    val_pred = self._forward(model, val_x)
-                    val_loss = loss_fn(val_pred, val_y).item()
-                mlflow.log_metric("train_loss", train_loss, step=epoch)
-                mlflow.log_metric("val_loss", val_loss, step=epoch)
+                    val_pred = tasks.forward(task, model, val_x)
+                    val_loss = tasks.loss(task, val_pred, val_y).item()
+                    val_metrics = tasks.metrics(task, val_pred, val_y, dataset.num_classes)
+                mlflow.log_metrics(
+                    {"train_loss": train_loss, "val_loss": val_loss, **{f"val_{k}": v for k, v in val_metrics.items()}},
+                    step=epoch,
+                )
                 self.trainer._update(current_epoch=epoch, train_loss=train_loss, val_loss=val_loss)
 
             checkpoint = Path(cfg.checkpoint_dir) / f"{run_id}.pt"
             checkpoint.parent.mkdir(parents=True, exist_ok=True)
             torch.save({"model_name": cfg.model_name, "config": asdict(model.config), "state_dict": model.state_dict()}, checkpoint)
             mlflow.log_artifact(str(checkpoint), artifact_path="checkpoints")
-            self._log_evaluation_html(model, val_x[:1], val_y[:1])
+            self._log_evaluation_html(model, dataset, val_x[:1], val_y[:1])
             stopped = self.stop_event.is_set()
             mlflow.set_tag("stopped_early", str(stopped))
 
         self.trainer._update(status="completed", checkpoint_path=str(checkpoint), stopped=stopped)
 
-    def _log_evaluation_html(self, model: nn.Module, coords: torch.Tensor, target: torch.Tensor) -> None:
-        from tools.dashboard.visualizer import plot_field_comparison  # plotly only needed here
-
+    def _log_evaluation_html(self, model: nn.Module, dataset: tasks.Dataset, coords: torch.Tensor, target: torch.Tensor) -> None:
         model.eval()
         with torch.no_grad():
-            pred = self._forward(model, coords)
-        figure = plot_field_comparison(coords[0].cpu().numpy(), None, target[0].cpu().numpy(), pred[0].cpu().numpy(), "Field")
+            pred = tasks.forward(dataset.task, model, coords)
+        figure = tasks.evaluation_figure(dataset, coords[0].cpu().numpy(), target[0].cpu(), pred[0].cpu())
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "evaluation.html"
             figure.write_html(path, include_plotlyjs="cdn")
@@ -237,6 +221,9 @@ class Trainer:
         if isinstance(config, dict):
             config = TrainingConfig(**config)
         ModelRegistry.get(config.model_name)  # fail fast on unknown model, before the thread starts
+        mismatch = tasks.input_mismatch(config.model_name)
+        if mismatch:
+            raise ValueError(mismatch.replace("`", ""))
         with self._lock:
             if self._state["status"] == "training":
                 raise RuntimeError("A training run is already in progress.")

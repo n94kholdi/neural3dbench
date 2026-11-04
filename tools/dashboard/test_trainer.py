@@ -15,6 +15,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 mlflow = pytest.importorskip("mlflow")
 
+import torch  # noqa: E402
+
+from tools.dashboard import tasks  # noqa: E402
 from tools.dashboard.trainer import Trainer, TrainingConfig  # noqa: E402
 
 
@@ -58,6 +61,22 @@ def test_two_epoch_synthetic_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     assert "evaluation/evaluation.html" in artifacts
 
 
+@pytest.mark.parametrize(("model_name", "dataset", "metric"), [("pointnet", "chair_parts", "val_miou"),
+                                                               ("mlp", "primitive_shapes", "val_accuracy")])
+def test_labelled_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, model_name: str, dataset: str, metric: str) -> None:
+    monkeypatch.chdir(tmp_path)
+    trainer = Trainer()
+    trainer.start_training({"model_name": model_name, "dataset": dataset, "epochs": 2, "batch_size": 4,
+                            "num_samples": 12, "num_points": 64, "experiment_name": "test-labelled"})
+    status = trainer.wait(timeout=120)
+    assert status["status"] == "completed", status["error"]
+    client = mlflow.tracking.MlflowClient(tracking_uri=(tmp_path / "mlruns").as_uri())
+    run = client.get_run(status["run_id"])
+    assert metric in run.data.metrics and run.data.params["task"] == tasks.DATASETS[dataset].task
+    checkpoint = torch.load(status["checkpoint_path"], weights_only=True)
+    assert checkpoint["config"]["output_dim"] == tasks.DATASETS[dataset].num_classes
+
+
 def test_stop_and_validation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
     trainer = Trainer()
@@ -65,6 +84,8 @@ def test_stop_and_validation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
         trainer.start_training({"model_name": "no-such-model"})
     with pytest.raises(ValueError):
         TrainingConfig(dataset="bogus")
+    with pytest.raises(ValueError, match="edge_index"):
+        trainer.start_training({"model_name": "gcn"})
 
     trainer.start_training({"model_name": "mlp", "epochs": 500, "num_samples": 8, "num_points": 32})
     with pytest.raises(RuntimeError):

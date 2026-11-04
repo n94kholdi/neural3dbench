@@ -32,10 +32,14 @@ REPRESENTATIONS = {
     "continuous_coords": "Continuous fields (coordinates)",
 }
 TASKS = ("surrogate_simulation", "pde_operator", "segmentation_classification", "field_fitting")
+# Not covered by any registered model yet; listed so the advisor can say so (tools/mcp_advisor/advisor.py).
+UNCOVERED_TASKS = ("object_detection", "instance_segmentation", "shape_completion", "shape_generation",
+                   "registration", "scene_flow")
 PRECISIONS = ("fp32", "fp16", "bf16", "amp")
 POLL_SECONDS = 2.0
 _VERTEX_KEYS = ("vertices", "coords", "coordinates", "points", "pos")
 _FIELD_KEYS = ("field", "target", "features", "values")
+_PLY_LABEL_KEYS = ("label", "class", "part", "scalar_label", "segment", "seg")
 
 
 # ---------------------------------------------------------------- geometry loading
@@ -46,7 +50,7 @@ def _fan(polygon: list[int]) -> list[list[int]]:
     return [[polygon[0], polygon[i], polygon[i + 1]] for i in range(1, len(polygon) - 1)]
 
 
-def _geometry(vertices: Any, faces: Any = None, field: Any = None) -> dict[str, Any]:
+def _geometry(vertices: Any, faces: Any = None, field: Any = None, labels: Any = None) -> dict[str, Any]:
     vertices = np.asarray(vertices, dtype=np.float64)
     if vertices.ndim != 2 or vertices.shape[1] != 3 or len(vertices) == 0:
         raise ValueError(f"vertices must have shape [N, 3]; got {vertices.shape}.")
@@ -54,7 +58,8 @@ def _geometry(vertices: Any, faces: Any = None, field: Any = None) -> dict[str, 
     if faces is not None and (faces.min() < 0 or faces.max() >= len(vertices)):
         raise ValueError("faces index outside the vertex array.")
     field = None if field is None else np.asarray(field, dtype=np.float64).reshape(len(vertices), -1)
-    return {"vertices": vertices, "faces": faces, "field": field}
+    labels = None if labels is None else np.asarray(labels, dtype=np.int64).reshape(len(vertices))
+    return {"vertices": vertices, "faces": faces, "field": field, "labels": labels}
 
 
 def parse_obj(text: str) -> dict[str, Any]:
@@ -74,7 +79,7 @@ def parse_obj(text: str) -> dict[str, Any]:
 
 
 def parse_ply(data: bytes) -> dict[str, Any]:
-    """ASCII PLY with a ``vertex`` element (x, y, z) and an optional ``face`` element.
+    """ASCII PLY with a ``vertex`` element (x, y, z, optional per-point label) and an optional ``face`` element.
 
     shortcut: binary PLY is rejected; add the plyfile dependency if binary uploads matter.
     """
@@ -94,14 +99,16 @@ def parse_ply(data: bytes) -> dict[str, Any]:
         elif parts[:1] == ["property"] and element == "vertex":
             vertex_props.append(parts[-1])
     columns = [vertex_props.index(axis) for axis in ("x", "y", "z")]
+    label_column = next((vertex_props.index(k) for k in _PLY_LABEL_KEYS if k in vertex_props), None)
     rows = body.decode("ascii").split("\n")[1:]  # drop the rest of the end_header line
     rows = [row.split() for row in rows if row.strip()]
     n_vertices = counts.get("vertex", 0)
     vertices = [[float(row[c]) for c in columns] for row in rows[:n_vertices]]
+    labels = None if label_column is None else [int(float(row[label_column])) for row in rows[:n_vertices]]
     faces = []
     for row in rows[n_vertices : n_vertices + counts.get("face", 0)]:
         faces += _fan([int(i) for i in row[1 : 1 + int(row[0])]])
-    return _geometry(vertices, faces)
+    return _geometry(vertices, faces, labels=labels)
 
 
 def _drop_batch(value: Any) -> Any:
@@ -151,13 +158,46 @@ def load_sample(name: str, num_points: int = 4096) -> dict[str, Any]:
     return _geometry(coords[0], field=target[0])
 
 
+DOWNLOADS = {
+    "shapenet_part": "ShapeNetPart: part segmentation, 16 categories (707 MB)",
+    "modelnet10": "ModelNet10: shape classification, 10 classes (473 MB)",
+    "modelnet40": "ModelNet40: shape classification, 40 classes (2.0 GB)",
+}
+
 SAMPLES = {
     "shape:sphere": "Sphere (examples/train_pointnet_synthetic.py)",
     "shape:cube": "Cube (examples/train_pointnet_synthetic.py)",
     "shape:cylinder": "Cylinder (examples/train_pointnet_synthetic.py)",
     "dataset:deformed_sphere": "Deformed sphere + radial displacement (trainer dataset)",
     "dataset:poisson": "Poisson manufactured solution (trainer dataset)",
+    "dataset:chair_parts": "Box chair colored by part id (trainer dataset)",
 }
+
+
+def parse_labelled_upload(files: list[tuple[str, bytes]], num_points: int) -> dict[str, Any]:
+    """One ``.npz`` (many samples) or several labelled ASCII ``.ply`` files (one sample each).
+
+    Returns ``{"coords" [B, N, 3], "labels" | "target", "class_names"}`` for ``tasks.save_npz_dataset``.
+    """
+    from tools.dashboard.data_sources import read_npz_upload, stack_samples
+
+    suffixes = {Path(name).suffix.lower() for name, _ in files}
+    if suffixes == {".npz"}:
+        if len(files) != 1:
+            raise ValueError("upload one .npz holding every sample.")
+        return read_npz_upload(files[0][1])
+    if suffixes != {".ply"}:
+        raise ValueError("upload either one .npz or one or more .ply files, not a mix.")
+    if len(files) < 2:
+        raise ValueError("a dataset needs at least 2 samples: upload one labelled .ply per shape.")
+    samples = []
+    for name, data in files:
+        geometry = parse_ply(data)
+        if geometry["labels"] is None:
+            raise ValueError(f"{name}: no per-point label property ({', '.join(_PLY_LABEL_KEYS)}).")
+        samples.append((geometry["vertices"], geometry["labels"]))
+    coords, labels = stack_samples(samples, num_points)
+    return {"coords": coords, "labels": labels, "target": None, "class_names": []}
 
 
 # ---------------------------------------------------------------- training helpers
@@ -210,8 +250,12 @@ def mlflow_client(tracking_uri: str) -> Any:
 
 
 def predict_sample(checkpoint_path: str, config: Any, sample: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Reload a checkpoint and predict one validation sample: ``(coords [N, 3], gt [N, 1], pred [N, C])``."""
-    from models import ModelInput, ModelOutput, ModelRegistry
+    """Reload a checkpoint and predict one validation sample: ``(coords [N, 3], target, raw model output)``.
+
+    Target and output shapes follow the dataset's task (see ``tools.dashboard.tasks``), without the batch dim.
+    """
+    from models import ModelRegistry
+    from tools.dashboard import tasks
     from tools.dashboard.trainer import make_synthetic_dataset
 
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
@@ -221,9 +265,8 @@ def predict_sample(checkpoint_path: str, config: Any, sample: int) -> tuple[np.n
     coords, target = make_synthetic_dataset(config)  # validation samples are the first rows, as in TrainingWorker
     x = coords[sample : sample + 1]
     with torch.no_grad():
-        output = model(ModelInput(coordinates=x))
-    pred = output.predictions if isinstance(output, ModelOutput) else output
-    return x[0].numpy(), target[sample].numpy(), pred.reshape(x.shape[1], -1).numpy()
+        pred = tasks.forward(tasks.DATASETS[config.dataset].task, model, x)
+    return x[0].numpy(), target[sample].numpy(), pred[0].numpy()
 
 
 def num_validation_samples(config: Any) -> int:
@@ -238,8 +281,20 @@ def main() -> None:
 
     from models import ModelRegistry
     from tools.dashboard.advisor_bridge import AdvisorBridge
-    from tools.dashboard.trainer import SYNTHETIC_DATASETS, Trainer, TrainingConfig
-    from tools.dashboard.visualizer import plot_field_comparison, plot_mesh, plot_point_cloud
+    from tools.dashboard.data_sources import SHAPENET_PART_RANGES, import_modelnet, import_shapenet_part, suggest_name
+    from tools.dashboard.tasks import (
+        BUILTIN_DATASETS,
+        DATA_DIR,
+        DATASETS,
+        dataset_for_problem,
+        evaluation_figure,
+        input_mismatch,
+        make_dataset,
+        save_npz_dataset,
+        update_classes,
+    )
+    from tools.dashboard.trainer import Trainer, TrainingConfig
+    from tools.dashboard.visualizer import class_color, plot_labelled_points, plot_mesh, plot_point_cloud
 
     st.set_page_config(page_title="Neural3DBench Dashboard", layout="wide")
 
@@ -256,6 +311,10 @@ def main() -> None:
     def cached_sample(name: str, num_points: int) -> dict[str, Any]:
         return load_sample(name, num_points)
 
+    @st.cache_data(show_spinner=False)
+    def cached_input_mismatch(model_name: str) -> str | None:
+        return input_mismatch(model_name)
+
     @st.cache_data(show_spinner="Running the model on the validation sample...")
     def cached_prediction(checkpoint_path: str, config_json: str, sample: int) -> tuple[np.ndarray, ...]:
         return predict_sample(checkpoint_path, TrainingConfig(**json.loads(config_json)), sample)
@@ -267,20 +326,23 @@ def main() -> None:
 
     def use_model(name: str) -> None:
         st.session_state["train_model"] = name
-        st.toast(f"{name} selected in the Training tab.")
+        dataset = st.session_state.get("problem_dataset")
+        if dataset:
+            st.session_state["train_dataset"] = dataset
+        st.toast(f"{name} selected in the Training tab" + (f" with the {dataset} dataset." if dataset else "."))
 
     st.title("Neural3DBench Dashboard")
     if bridge.source != "advisor":
         st.warning(f"Advisor unavailable, using the registry fallback: {bridge.error}")
     advisor_tab, preview_tab, train_tab, inspect_tab = st.tabs(
-        ["1 · Problem & Advisor", "2 · 3D Data Preview", "3 · Training", "4 · Inspection"]
+        ["1 · Problem & Advisor", "2 · Data", "3 · Training", "4 · Inspection"]
     )
 
     # ------------------------------------------------------------ 1. advisor
     with advisor_tab:
         with st.form("problem"):
             c1, c2, c3, c4 = st.columns(4)
-            task = c1.selectbox("Task domain", TASKS, format_func=lambda t: t.replace("_", " "))
+            task = c1.selectbox("Task domain", TASKS + UNCOVERED_TASKS, format_func=lambda t: t.replace("_", " "))
             representation = c2.selectbox("Data representation", list(REPRESENTATIONS), format_func=REPRESENTATIONS.get)
             num_nodes = c3.number_input("Points / vertices per sample", min_value=1, value=10_000, step=1_000)
             vram_gb = c4.number_input("Target GPU memory (GB)", min_value=0.5, value=8.0, step=1.0)
@@ -294,14 +356,28 @@ def main() -> None:
                 )
             except (ValueError, KeyError) as exc:
                 st.error(str(exc))
+            else:
+                no_fit = st.session_state["recommendations"].get("verdict") == "no_fit"
+                st.session_state["problem_dataset"] = None if no_fit else dataset_for_problem(task, description)
 
         result = st.session_state.get("recommendations")
         if result:
+            verdict = result.get("verdict", "fit")
+            if verdict == "no_fit":
+                st.error(f"**Not supported yet.** {result['reason']}")
+                for net in result.get("suggested_networks", []):
+                    st.markdown(f"- **{net['name']}**: {net['why']} [paper]({net['reference']})")
+                if result.get("suggested_networks"):
+                    st.caption("Add one of these as a new architecture (see `docs/adding_a_network.md`); "
+                               "the advisor picks it up from the registry and catalog.yaml.")
+            elif verdict == "weak_fit":
+                st.warning(result["reason"])
             st.caption(f"{result.get('note', '')} Considered {result.get('considered', 0)} models; source: {result['source']}.")
             if not result["recommendations"]:
                 st.info("No registered model matches this representation.")
+            container = st.expander("Closest registered models (not a fit for this task)") if verdict == "no_fit" else st.container()
             for rank, row in enumerate(result["recommendations"], 1):
-                with st.container(border=True):
+                with container, st.container(border=True):
                     head, score, memory, fits = st.columns([3, 1, 1, 1])
                     head.subheader(f"#{rank} {row.get('display_name', row['model'])}")
                     score.metric("Score", row.get("score"))
@@ -330,7 +406,7 @@ def main() -> None:
                             st.markdown("**Full dossier**")
                             st.json(dossier, expanded=False)
                     right.button("Use for training", key=f"use_{row['model']}", on_click=use_model, args=(row["model"],),
-                                 width="stretch")
+                                 width="stretch", disabled=verdict == "no_fit")
 
         with st.expander("Estimate VRAM", expanded=not result):
             c1, c2, c3, c4 = st.columns(4)
@@ -353,45 +429,152 @@ def main() -> None:
                 if estimate.get("assumptions"):
                     st.caption(estimate["assumptions"])
 
-    # ------------------------------------------------------------ 2. preview
+    # ------------------------------------------------------------ 2. data
     with preview_tab:
-        source = st.radio("Source", ("Repository sample", "Upload file"), horizontal=True)
-        geometry, label = None, ""
-        try:
-            if source == "Upload file":
-                upload = st.file_uploader("3D file", type=["obj", "ply", "pt"])
-                if upload is not None:
-                    geometry, label = load_geometry(upload.name, upload.getvalue()), upload.name
+        mode = st.radio("Data", ("Preview geometry", "Download a dataset", "Upload a labelled dataset"),
+                        horizontal=True, label_visibility="collapsed")
+        if mode == "Preview geometry":
+            source = st.radio("Source", ("Repository sample", "Upload file"), horizontal=True)
+            geometry, label = None, ""
+            try:
+                if source == "Upload file":
+                    upload = st.file_uploader("3D file", type=["obj", "ply", "pt"])
+                    if upload is not None:
+                        geometry, label = load_geometry(upload.name, upload.getvalue()), upload.name
+                else:
+                    c1, c2 = st.columns([3, 1])
+                    sample = c1.selectbox("Sample", list(SAMPLES), format_func=SAMPLES.get)
+                    points = c2.number_input("Points", min_value=64, max_value=50_000, value=4096, step=512)
+                    geometry, label = cached_sample(sample, int(points)), SAMPLES[sample]
+            except Exception as exc:  # noqa: BLE001 - any parse error is a user-facing message, not a crash
+                st.error(f"Could not load geometry: {exc}")
+            if geometry is not None:
+                vertices, faces, field = geometry["vertices"], geometry["faces"], geometry["field"]
+                st.caption(f"{len(vertices):,} vertices" + (f", {len(faces):,} triangles" if faces is not None else "")
+                           + (f", field with {field.shape[1]} channel(s)" if field is not None else ""))
+                if geometry["labels"] is not None:
+                    figure = plot_labelled_points(vertices, geometry["labels"], title=label)
+                elif faces is not None:
+                    figure = plot_mesh(vertices, faces, field, title=label)
+                else:
+                    figure = plot_point_cloud(vertices, field, title=label)
+                st.plotly_chart(figure, width="stretch")
+
+        elif mode == "Download a dataset":
+            st.caption(f"Archives and converted datasets are cached in `{DATA_DIR}` (set `NEURAL3DBENCH_DATA` to move it).")
+            source = st.selectbox("Dataset", list(DOWNLOADS), format_func=DOWNLOADS.get)
+            c1, c2, c3 = st.columns(3)
+            if source == "shapenet_part":
+                category = c1.selectbox("Category", [*SHAPENET_PART_RANGES, "All"])
+                points = c2.number_input("Points per shape", 256, 8192, 2048, step=256)
+                limit = c3.number_input("Max shapes (0 = all)", 0, 20_000, 500, step=100)
             else:
-                c1, c2 = st.columns([3, 1])
-                sample = c1.selectbox("Sample", list(SAMPLES), format_func=SAMPLES.get)
-                points = c2.number_input("Points", min_value=64, max_value=50_000, value=4096, step=512)
-                geometry, label = cached_sample(sample, int(points)), SAMPLES[sample]
-        except Exception as exc:  # noqa: BLE001 - any parse error is a user-facing message, not a crash
-            st.error(f"Could not load geometry: {exc}")
-        if geometry is not None:
-            vertices, faces, field = geometry["vertices"], geometry["faces"], geometry["field"]
-            st.caption(f"{len(vertices):,} vertices" + (f", {len(faces):,} triangles" if faces is not None else "")
-                       + (f", field with {field.shape[1]} channel(s)" if field is not None else ""))
-            if faces is not None:
-                figure = plot_mesh(vertices, faces, field, title=label)
-            else:
-                figure = plot_point_cloud(vertices, field, title=label)
-            st.plotly_chart(figure, width="stretch")
+                points = c2.number_input("Points per shape", 256, 8192, 1024, step=256)
+                limit = c3.number_input("Max meshes per class (0 = all)", 0, 1_000, 100, step=50)
+            if st.button("Download and import", type="primary"):
+                bar = st.progress(0.0, text="Starting...")
+
+                def report(fraction: float, message: str) -> None:
+                    bar.progress(fraction, text=message)
+
+                try:
+                    if source == "shapenet_part":
+                        dataset = import_shapenet_part(category, int(points), int(limit) or None, progress=report)
+                    else:
+                        dataset = import_modelnet(int(source[-2:]), int(points), int(limit) or None, progress=report)
+                except Exception as exc:  # noqa: BLE001 - network/archive errors are user-facing messages
+                    st.error(f"Import failed: {exc}")
+                else:
+                    st.session_state["train_dataset"] = dataset.name
+                    st.success(f"Registered `{dataset.name}`: {dataset.description} Selected in the Training tab.")
+
+        else:
+            st.caption("One `.npz` with `coords [B, N, 3]` and `labels` (`[B, N]` part ids or `[B]` class ids) or a "
+                       "float `target [B, N, C]`, optionally `class_names`; or one ASCII `.ply` per shape with a "
+                       "per-point `label` property.")
+            files = st.file_uploader("Labelled files", type=["npz", "ply"], accept_multiple_files=True)
+            if files:
+                c1, c2 = st.columns(2)
+                name = c1.text_input("Dataset name", value=suggest_name(files[0].name))
+                points = c2.number_input("Points per shape (.ply files are resampled)", 64, 100_000, 2048, step=256)
+                try:
+                    parsed = parse_labelled_upload([(f.name, f.getvalue()) for f in files], int(points))
+                    coords, labels = np.asarray(parsed["coords"]), parsed["labels"]
+                    st.caption(f"{coords.shape[0]} samples x {coords.shape[1]} points"
+                               + (f", {int(labels.max()) + 1} classes" if labels is not None else ", float target"))
+                    if labels is not None and labels.ndim == 2:
+                        st.plotly_chart(plot_labelled_points(coords[0], labels[0], parsed["class_names"],
+                                                             title="Sample 0 by label"), width="stretch")
+                except Exception as exc:  # noqa: BLE001 - any parse error is a user-facing message
+                    st.error(f"Could not read the upload: {exc}")
+                else:
+                    if st.button("Save dataset", type="primary"):
+                        try:
+                            dataset = save_npz_dataset(name, coords, labels=labels, target=parsed["target"],
+                                                       class_names=parsed["class_names"],
+                                                       description=f"Uploaded from {files[0].name}"
+                                                       + (f" and {len(files) - 1} more" if len(files) > 1 else "") + ".")
+                        except ValueError as exc:
+                            st.error(str(exc))
+                        else:
+                            st.session_state["train_dataset"] = dataset.name
+                            st.success(f"Saved `{dataset.name}` ({dataset.task.replace('_', ' ')}); name its classes below.")
+
+        saved = [n for n in DATASETS if n not in BUILTIN_DATASETS]
+        if mode != "Preview geometry" and saved:
+            st.subheader("Saved datasets: class names and colors")
+            pick = st.selectbox("Saved dataset", saved, key="edit_dataset")
+            chosen = DATASETS[pick]
+            st.caption(f"{chosen.task.replace('_', ' ')}: {chosen.description}")
+            if chosen.class_names:
+                import pandas as pd
+
+                table = pd.DataFrame({
+                    "id": range(chosen.num_classes),
+                    "name": list(chosen.class_names),
+                    "color": [class_color(i, chosen.class_colors) for i in range(chosen.num_classes)],
+                })
+                edited = st.data_editor(table, disabled=["id"], hide_index=True, key=f"classes_{pick}",
+                                        column_config={"color": st.column_config.TextColumn("color (hex)")})
+                if st.button("Save classes"):
+                    try:
+                        update_classes(pick, edited["name"].astype(str).tolist(), edited["color"].astype(str).tolist())
+                    except ValueError as exc:
+                        st.error(str(exc))
+                    else:
+                        st.success("Classes saved.")
+                        st.rerun()
+                coords, target = make_dataset(pick, 1, 4096)
+                if chosen.task == "part_segmentation":
+                    st.plotly_chart(plot_labelled_points(coords[0], target[0], chosen.class_names, chosen.class_colors,
+                                                         title="A random sample by part"), width="stretch")
+                else:
+                    st.plotly_chart(plot_point_cloud(coords[0], title=f"A random sample: {chosen.class_names[int(target[0])]}"),
+                                    width="stretch")
 
     # ------------------------------------------------------------ 3. training
     with train_tab:
         status = trainer.get_status()
         running = status["status"] == "training"
-        st.caption("Synthetic datasets feed `coordinates [B, N, 3]` and regress a field `[B, N, 1]`, "
-                   "so they suit coordinate and point models (mlp, siren, pointnet, transolver, ...).")
         c1, c2, c3 = st.columns(3)
         c1.selectbox("Model", model_names, key="train_model", disabled=running)
-        c2.selectbox("Dataset", sorted(SYNTHETIC_DATASETS), key="train_dataset", disabled=running)
+        c2.selectbox("Dataset", sorted(DATASETS), key="train_dataset", disabled=running,
+                     format_func=lambda d: f"{d} ({DATASETS[d].task.replace('_', ' ')})")
         c3.text_input("Experiment name", key="train_experiment", disabled=running)
         c1.number_input("Epochs", min_value=1, max_value=10_000, key="train_epochs", disabled=running)
         c2.number_input("Learning rate", min_value=1e-7, max_value=1.0, format="%.1e", step=1e-4, key="train_lr", disabled=running)
         c3.number_input("Batch size", min_value=1, max_value=4096, key="train_batch", disabled=running)
+        chosen = DATASETS[st.session_state["train_dataset"]]
+        st.caption(f"**{chosen.task.replace('_', ' ')}**: {chosen.description}"
+                   + (f" Classes: {', '.join(chosen.class_names)}." if chosen.class_names else "")
+                   + " The model head (`output_dim`, `task`) is sized from the dataset; JSON overrides win.")
+        mismatch = cached_input_mismatch(st.session_state["train_model"])
+        if mismatch:
+            st.warning(mismatch)
+        problem = st.session_state.get("problem_dataset")
+        if problem and DATASETS[problem].task != chosen.task:
+            st.warning(f"The advisor problem is {DATASETS[problem].task.replace('_', ' ')}, but `{chosen.name}` "
+                       f"trains {chosen.task.replace('_', ' ')}. Pick `{problem}` to train for your problem.")
         with st.expander("Advanced"):
             a1, a2, a3, a4 = st.columns(4)
             a1.selectbox("Optimizer", ("adam", "adamw", "sgd"), key="train_optimizer", disabled=running)
@@ -467,8 +650,7 @@ def main() -> None:
             sample = st.slider("Validation sample", 0, num_validation_samples(config) - 1, 0)
             try:
                 coords, gt, pred = cached_prediction(status["checkpoint_path"], json.dumps(asdict(config)), sample)
-                metric_name = "Displacement" if config.dataset == "deformed_sphere" else "u"
-                st.plotly_chart(plot_field_comparison(coords, None, gt, pred, metric_name), width="stretch")
+                st.plotly_chart(evaluation_figure(DATASETS[config.dataset], coords, gt, pred), width="stretch")
             except Exception as exc:  # noqa: BLE001 - checkpoint/model mismatch is shown, not raised
                 st.error(f"Could not run the trained model: {exc}")
 

@@ -1,4 +1,4 @@
-"""Plotly figures for point clouds, surface meshes and predicted-vs-true fields.
+"""Plotly figures for point clouds, surface meshes, predicted-vs-true fields and part labels.
 
 Inputs may be NumPy arrays, CPU torch tensors or nested lists. Samples above
 ``MAX_RENDER_ELEMENTS`` points/vertices are downsampled for browser rendering.
@@ -170,5 +170,73 @@ def plot_field_comparison(
         title=f"{metric_name}: MAE {error.mean():.4g}, max {error.max():.4g}",
         margin={"l": 0, "r": 0, "t": 60, "b": 0},
         uirevision="field-comparison",
+    )
+    return figure
+
+
+_PART_COLORS = ("#1f77b4", "#ff7f0e", "#2ca02c", "#9467bd", "#8c564b", "#e377c2", "#17becf", "#bcbd22")
+
+
+def class_color(index: int, class_colors: Any = ()) -> str:
+    """The dataset's color for class ``index``, else the default palette (cycles after 8)."""
+    return class_colors[index] if index < len(class_colors) else _PART_COLORS[index % len(_PART_COLORS)]
+
+
+def plot_labelled_points(coords: Any, labels: Any, class_names: Any = (), class_colors: Any = (), title: str = "") -> go.Figure:
+    """Scatter3d with one color and legend entry per class id in ``labels`` [N]."""
+    points = _coords(coords, "coords")
+    labels = np.asarray(labels, dtype=np.int64).reshape(-1)
+    index = downsample_points(len(points))
+    points, labels = points[index], labels[index]
+    figure = go.Figure()
+    for c in np.unique(labels):
+        p = points[labels == c]
+        name = class_names[c] if c < len(class_names) else f"class {c}"
+        figure.add_trace(go.Scatter3d(x=p[:, 0], y=p[:, 1], z=p[:, 2], mode="markers", name=name,
+                                      marker={"size": 2, "color": class_color(int(c), class_colors)}))
+    figure.update_layout(title=title, scene=_scene(), legend={"itemsizing": "constant"}, margin={"l": 0, "r": 0, "t": 40, "b": 0})
+    return figure
+
+
+def plot_segmentation_comparison(
+    coords: Any, gt_labels: Any, pred_labels: Any, class_names: Any = (), class_colors: Any = ()
+) -> go.Figure:
+    """1x3 subplots: ground-truth parts, predicted parts and misclassified points (red), one color per part.
+
+    ``class_colors`` (hex per class) overrides the default palette, which cycles after 8 parts.
+    """
+    points = _coords(coords, "coords")
+    gt = np.asarray(gt_labels, dtype=np.int64).reshape(-1)
+    pred = np.asarray(pred_labels, dtype=np.int64).reshape(-1)
+    if gt.shape != (len(points),) or pred.shape != (len(points),):
+        raise ValueError(f"labels must have shape [N] with N={len(points)}; got {gt.shape} and {pred.shape}.")
+    index = downsample_points(len(points))
+    points, gt, pred = points[index], gt[index], pred[index]
+    names = list(class_names) or [f"part {c}" for c in range(int(max(gt.max(), pred.max())) + 1)]
+
+    figure = make_subplots(rows=1, cols=3, specs=[[{"type": "scene"}] * 3], horizontal_spacing=0.02,
+                           subplot_titles=("Ground-truth parts", "Predicted parts", "Misclassified points (red)"))
+
+    def scatter(mask: np.ndarray, color: str, name: str, show: bool) -> go.Scatter3d:
+        p = points[mask]
+        return go.Scatter3d(x=p[:, 0], y=p[:, 1], z=p[:, 2], mode="markers", marker={"size": 2, "color": color},
+                            name=name, legendgroup=name, showlegend=show)
+
+    for c, name in enumerate(names):
+        color = class_color(c, class_colors)
+        figure.add_trace(scatter(gt == c, color, name, True), 1, 1)
+        figure.add_trace(scatter(pred == c, color, name, False), 1, 2)
+    wrong = gt != pred
+    figure.add_trace(scatter(~wrong, "lightgray", "correct", True), 1, 3)
+    figure.add_trace(scatter(wrong, "red", "misclassified", True), 1, 3)
+
+    ious = [((gt == c) & (pred == c)).sum() / union for c in range(len(names)) if (union := ((gt == c) | (pred == c)).sum())]
+    scene = _scene()
+    figure.update_layout(
+        scene=scene, scene2=scene, scene3=scene,
+        title=f"Point accuracy {1 - wrong.mean():.1%}, mIoU {np.mean(ious):.1%}",
+        legend={"itemsizing": "constant"},
+        margin={"l": 0, "r": 0, "t": 60, "b": 0},
+        uirevision="segmentation-comparison",
     )
     return figure

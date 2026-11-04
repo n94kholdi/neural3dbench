@@ -25,6 +25,15 @@ from tools.dashboard.app import load_geometry, load_sample  # noqa: E402
 APP = str(Path(__file__).with_name("app.py"))
 
 
+@pytest.fixture(autouse=True)
+def _fresh_streamlit_caches() -> None:
+    """The cached Trainer outlives an AppTest; clear it so a run from another tmp dir does not leak in."""
+    import streamlit as st
+
+    st.cache_resource.clear()
+    st.cache_data.clear()
+
+
 def test_parse_obj_quad_and_slashes() -> None:
     text = "v 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nf 1/1/1 2/2/2 3/3/3 4/4/4\nf -4 -3 -2\n"
     geometry = load_geometry("quad.obj", text.encode())
@@ -63,6 +72,23 @@ def test_parse_pt_tensor_and_dict() -> None:
 def test_samples() -> None:
     assert load_sample("shape:cube", 128)["vertices"].shape == (128, 3)
     assert load_sample("dataset:poisson", 128)["field"].shape == (128, 1)
+    assert load_sample("dataset:chair_parts", 128)["field"].shape == (128, 1)
+
+
+def test_advisor_task_reaches_training_tab(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    app = AppTest.from_file(APP, default_timeout=120).run()
+    app.selectbox[0].set_value("segmentation_classification")
+    app.text_input[0].set_value("semantic part segmentation of chairs")
+    app.button(key="FormSubmitter:problem-Get recommendations").click().run()
+    top = app.session_state["recommendations"]["recommendations"][0]["model"]
+    app.button(key=f"use_{top}").click().run()
+    assert app.session_state["train_model"] == top
+    assert app.session_state["train_dataset"] == "chair_parts"
+    assert not app.warning, [w.value for w in app.warning]
+
+    app.selectbox(key="train_dataset").set_value("poisson").run()
+    assert any("part segmentation" in w.value for w in app.warning)
 
 
 def test_app_end_to_end(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -95,6 +121,29 @@ def test_app_end_to_end(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
     app.number_input(key="train_epochs").set_value(7)
     next(b for b in app.button if b.label.startswith("Launch New Run")).click().run()
     assert app.session_state["train_epochs"] == 2
+
+
+
+def test_uncovered_task_shows_not_supported(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    app = AppTest.from_file(APP, default_timeout=120).run()
+    app.selectbox[0].set_value("object_detection")
+    app.button(key="FormSubmitter:problem-Get recommendations").click().run()
+    assert not app.exception, app.exception
+    assert any("Not supported yet" in e.value for e in app.error)
+    assert app.session_state["problem_dataset"] is None
+    assert all(b.disabled for b in app.button if b.label == "Use for training")
+
+
+
+def test_data_tab_modes_render(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("NEURAL3DBENCH_DATA", str(tmp_path / "cache"))
+    app = AppTest.from_file(APP, default_timeout=120).run()
+    for mode, element in (("Download a dataset", "Download and import"), ("Upload a labelled dataset", None)):
+        next(r for r in app.radio if r.label == "Data").set_value(mode).run()
+        assert not app.exception, app.exception
+        assert (element in [b.label for b in app.button]) == (element is not None)
 
 
 if __name__ == "__main__":
