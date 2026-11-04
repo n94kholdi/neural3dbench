@@ -11,9 +11,11 @@ from .pcn import PCN, PCNConfig
 from .pointnet import PointNet, PointNetConfig
 from .pointnet2 import PointNet2, PointNet2Config
 from .pointnext import PointNeXt, PointNeXtConfig
+from .pointpillars import PointPillars, PointPillarsConfig
 from .siren import SineLayer, SIREN, SIRENConfig
 from .transolver import Transolver, TransolverConfig
 from .unet3d import UNet3D, UNet3DConfig
+from .votenet import VoteNet, VoteNetConfig
 from .registry import ModelRegistry, create_model
 from .representations import (
     CoordinateRepresentationAdapter,
@@ -63,6 +65,8 @@ __all__ = [
     "PointNet2Config",
     "PointNeXt",
     "PointNeXtConfig",
+    "PointPillars",
+    "PointPillarsConfig",
     "RepresentationAdapter",
     "SineLayer",
     "SIREN",
@@ -72,5 +76,7 @@ __all__ = [
     "TransolverConfig",
     "UNet3D",
     "UNet3DConfig",
+    "VoteNet",
+    "VoteNetConfig",
     "create_model",
 ]

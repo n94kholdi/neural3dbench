@@ -127,7 +127,7 @@ def test_app_end_to_end(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
 def test_uncovered_task_shows_not_supported(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
     app = AppTest.from_file(APP, default_timeout=120).run()
-    app.selectbox[0].set_value("object_detection")
+    app.selectbox[0].set_value("instance_segmentation")
     app.button(key="FormSubmitter:problem-Get recommendations").click().run()
     assert not app.exception, app.exception
     assert any("Not supported yet" in e.value for e in app.error)

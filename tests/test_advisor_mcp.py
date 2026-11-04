@@ -123,7 +123,7 @@ def test_recommendations_respect_input_and_flag_vram(advisor):
 
 
 @pytest.mark.parametrize(("query", "capability"), [
-    ("3D object detection of cars in lidar scans", "object_detection"),
+    ("scene flow between two lidar frames", "scene_flow"),
     ("generate new shapes with diffusion", "shape_generation"),
     ("instance segmentation of chairs in an office scan", "instance_segmentation"),
     ("rigid registration of two scans", "registration"),
@@ -264,3 +264,10 @@ def test_shape_completion_recommends_completion_models(advisor):
     result = advisor.recommend_architecture("point cloud completion from partial scans", "point_cloud", 4096)
     assert result["verdict"] == "fit" and "shape_completion" in result["inferred_tasks"]
     assert {row["model"] for row in result["recommendations"][:2]} == {"pcn", "foldingnet"}
+
+
+def test_object_detection_recommends_detectors(advisor):
+    result = advisor.recommend_architecture("3D object detection of cars in lidar scans", "point_cloud", 20000)
+    assert result["verdict"] == "fit" and "object_detection" in result["inferred_tasks"]
+    assert result["recommendations"][0]["model"] == "pointpillars"
+    assert {row["model"] for row in result["recommendations"][:2]} == {"pointpillars", "votenet"}

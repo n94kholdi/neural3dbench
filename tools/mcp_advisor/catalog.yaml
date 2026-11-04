@@ -12,7 +12,7 @@
 #   representations    Native inputs: point_cloud | mesh_graph | voxel_grid | continuous_coords
 #   also_accepts       {representation: conversion note} for inputs usable after conversion.
 #   tasks              surrogate_simulation | pde_operator | segmentation_classification | field_fitting
-#                      | shape_completion
+#                      | shape_completion | object_detection
 #   element            What num_elements counts for this model (point, node, voxel, ...).
 #   inductive_biases, merits, demerits: lists of short statements.
 #   complexity         time / memory Big-O strings plus notes (N = elements per sample).
@@ -568,3 +568,70 @@ models:
     receptive_field: {kind: global, note: Every output point sees only the global codeword.}
     resolution_transfer: partial
     keywords: [completion, autoencoder, reconstruction, folding, unsupervised, upsample]
+
+  pointpillars:
+    display_name: PointPillars
+    paradigm: Per-pillar PointNet scattered to a BEV pseudo-image, a 2D CNN backbone and an SSD anchor head for oriented 3D boxes.
+    representations: [point_cloud]
+    also_accepts:
+      voxel_grid: Use occupied voxel centres (plus their values as point features) as the input cloud.
+    tasks: [object_detection]
+    element: point
+    inductive_biases:
+      - Bird's-eye view - objects stand on a ground plane and do not overlap vertically; z is collapsed per pillar.
+      - Translation equivariance in x/y through the 2D convolutions; fixed metric grid over point_cloud_range.
+      - Anchor priors - one fixed size per class at two headings (0, pi/2), matched by BEV IoU.
+    merits:
+      - Fast (the paper reports 62 Hz on KITTI); all heavy layers are dense 2D convolutions.
+      - Cost depends mainly on the grid size, not on the number of points.
+      - Strong LiDAR baseline for cars, pedestrians and cyclists in outdoor scenes.
+    demerits:
+      - Points outside point_cloud_range are dropped; the range and pillar_size must match the sensor and scene.
+      - Weak on small or vertically stacked objects; height structure is reduced to pillar features.
+      - Needs boxes with class labels, per-class anchor sizes and NMS after inference.
+      - BEV IoU for matching snaps boxes to the nearest axis; no rotated-IoU matching.
+    complexity:
+      time: O(N + H*W)
+      memory: O(N + H*W)
+      notes: N = points, H*W = pillar grid (496 x 432 by default); the dense backbone dominates.
+    memory_model: {per_element: 265, per_element_sq: 0, per_sample: 245000000}
+    speed: 4
+    expressivity: 3
+    dynamic_topology: true
+    symmetries: [permutation]
+    receptive_field: {kind: global, note: 2D CNN receptive field over the BEV grid (about 30 m at defaults); no global pooling.}
+    resolution_transfer: false
+    keywords: [detection, lidar, bounding box, autonomous driving, outdoor, car, pedestrian, kitti, bev]
+
+  votenet:
+    display_name: VoteNet
+    paradigm: PointNet++ seeds vote for object centres (deep Hough voting); vote clusters are grouped and decoded into oriented 3D boxes.
+    representations: [point_cloud]
+    also_accepts:
+      mesh_graph: Use mesh vertices (or surface samples) as the input cloud; connectivity is ignored.
+    tasks: [object_detection]
+    element: point
+    inductive_biases:
+      - Object centres often lie in empty space; seeds on the surface vote for them before grouping.
+      - Locality through metric-ball neighbourhoods (PointNet++); radii assume metric units.
+      - Heading as 12 bins plus a residual, size as per-class mean size plus a residual.
+    merits:
+      - Works directly on points, with no grid or anchors; fits cluttered indoor scans (ScanNet, SUN RGB-D).
+      - Fixed sample counts cap the cost of the deep layers.
+      - Light (about 1M parameters).
+    demerits:
+      - Farthest-point sampling is sequential (O(S*N)) and slow on large outdoor LiDAR sweeps.
+      - mean_sizes must be set per dataset; the default is a single 1 m cube class.
+      - Needs boxes with class labels and NMS after inference; this loss uses one vote per seed.
+    complexity:
+      time: O(S*N + S*K*C)
+      memory: O(S*N)
+      notes: S = first-stage centroids (2048 default), K = neighbours per ball (64); the [S, N] ball-query distance matrix is transient.
+    memory_model: {per_element: 2048, per_element_sq: 0, per_sample: 164000000}
+    speed: 3
+    expressivity: 3
+    dynamic_topology: true
+    symmetries: [permutation]
+    receptive_field: {kind: global, note: Seed features see up to the last ball radius (1.2 m); proposals aggregate votes within proposal_radius.}
+    resolution_transfer: partial
+    keywords: [detection, indoor, scan, bounding box, votes, hough, scannet, sun rgb-d, furniture]

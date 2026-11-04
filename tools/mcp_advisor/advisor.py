@@ -21,7 +21,7 @@ CATALOG_PATH = Path(__file__).with_name("catalog.yaml")
 INTROSPECT_SCRIPT = Path(__file__).with_name("_introspect.py")
 
 REPRESENTATIONS = ("point_cloud", "mesh_graph", "voxel_grid", "continuous_coords")
-TASKS = ("surrogate_simulation", "pde_operator", "segmentation_classification", "field_fitting", "shape_completion")
+TASKS = ("surrogate_simulation", "pde_operator", "segmentation_classification", "field_fitting", "shape_completion", "object_detection")
 REQUIRED_CATALOG_FIELDS = (
     "display_name",
     "paradigm",
@@ -67,19 +67,12 @@ _TASK_KEYWORDS = {
     "surrogate_simulation": ("simulat", "surrogate", "cfd", "fea", "fem", "rollout", "transient", "dynamics", "time-step"),
     "field_fitting": ("pinn", "implicit", "sdf", "fit", "neural field", "reconstruct"),
     "shape_completion": ("complet", "partial scan", "missing part", "upsampl", "densif"),
+    "object_detection": ("detect", "bounding box", "3d box", "localiz"),
 }
 
 # Capabilities no catalog task covers. A catalog entry may list one of these keys under ``tasks``
 # once a model implements it; until then the advisor answers "no_fit" instead of a wrong model.
 MISSING_CAPABILITIES = {
-    "object_detection": {
-        "keywords": ("detect", "bounding box", "3d box", "localiz"),
-        "needs": "Oriented 3D boxes per object (center, size, heading, class): a box head, anchor/vote matching and a box loss.",
-        "suggested_networks": [
-            {"name": "PointPillars", "why": "Fast pillar-based detector for LiDAR scenes.", "reference": "https://arxiv.org/abs/1812.05784"},
-            {"name": "VoteNet", "why": "Hough voting on PointNet++ features for indoor scenes.", "reference": "https://arxiv.org/abs/1904.09664"},
-        ],
-    },
     "instance_segmentation": {
         "keywords": ("instance",),
         "needs": "A separate id per object instance, not only per class: offset/embedding head and clustering.",
