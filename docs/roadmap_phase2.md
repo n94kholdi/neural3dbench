@@ -61,11 +61,7 @@ The advisor currently returns `no_fit` for several tasks. Suggested additions, i
 - Publish a PyPI release.
 - Build a documentation site (mkdocs-material can reuse `docs/` as is).
 - Add one Colab notebook per task.
-- Generate the README model table from the registry so it cannot drift. It currently
-  lists 14 models and is missing PCN, FoldingNet, PointPillars, VoteNet, GINO and DCP.
-- Remove `checkpoints/gcn_synthetic.pt` from git (it is tracked although `.gitignore`
-  excludes `checkpoints/*.pt`), or move it to the Hugging Face Hub.
-- Replace the `YOUR_USERNAME` placeholder in the README install instructions.
+- Generate the README model table from the registry so it cannot drift.
 - Add a CPU smoke test in CI that runs every registered model on one batch.
 
 ## Suggested order of work

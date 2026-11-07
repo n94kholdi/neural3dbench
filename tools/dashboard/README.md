@@ -28,8 +28,8 @@ MLflow 3 defaults `mlflow ui` to a SQLite store and rejects the file store unles
    recommendations (`AdvisorBridge.get_recommendations`). Each card opens the model dossier;
    *Use for training* preselects the model in tab 3 and the dataset that matches the problem
    (`tasks.dataset_for_problem`, e.g. part segmentation selects `chair_parts`).
-   When no registered model can do the task (detection, instance segmentation, completion,
-   generation, registration, scene flow), the advisor returns `verdict: "no_fit"`. The tab then shows
+   When no registered model can do the task (instance segmentation,
+   generation, scene flow), the advisor returns `verdict: "no_fit"`. The tab then shows
    *Not supported yet*, what the task needs and networks to add (with papers), and disables *Use for training*. *Estimate VRAM* gives the memory heuristic for any model.
 2. **Data**
    - *Preview geometry*: upload `.obj`, ASCII `.ply` (a per-point `label` property colors by class) or `.pt`

@@ -26,13 +26,29 @@ benchmarking neural networks for 3D geometry and physics simulations.
 | SIREN | Continuous coordinates / irregular points | Implemented |
 | MLP | Continuous coordinates / irregular points | Implemented |
 | Deep NURBS | NURBS parameterized 2D domains | Implemented |
+| Geometry-Informed Neural Operator (GINO) | Irregular points via latent grid | Implemented |
+| PCN | Point cloud (shape completion) | Implemented |
+| FoldingNet | Point cloud (autoencoder / completion) | Implemented |
+| PointPillars | LiDAR point cloud (3D detection) | Implemented |
+| VoteNet | Point cloud (3D detection) | Implemented |
+| Deep Closest Point (DCP) | Point-cloud pair (rigid registration) | Implemented |
+
+## Tools
+
+- **neural3d-advisor**: an MCP server that ranks registered models for a problem
+  description, explains their trade-offs and estimates memory. It returns `no_fit`
+  instead of a wrong model when no registered network covers the task. See
+  [tools/mcp_advisor/README.md](tools/mcp_advisor/README.md).
+- **Dashboard**: a Streamlit app that combines the advisor, 3D data preview, real
+  dataset download (ShapeNetPart, ModelNet10/40) and background MLflow training.
+  See [tools/dashboard/README.md](tools/dashboard/README.md).
 
 ## Installation
 
 Neural3DBench requires Python 3.10 or newer. For local development:
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/neural3dbench.git
+git clone https://github.com/n94kholdi/neural3dbench.git
 cd neural3dbench
 python -m venv .venv
 source .venv/bin/activate

@@ -113,6 +113,7 @@ def test_app_end_to_end(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
     while any(i.value.startswith("Finish a training run") for i in app.info) and time.time() < deadline:
         time.sleep(0.5)
         app.run()
+    app.run()  # the pass that saw completion may have rendered Tab 3 still locked; rerun to unlock the form
     assert not app.exception, app.exception
     assert any(m.label == "Final val_loss" for m in app.metric), ([e.value for e in app.error], [c.value for c in app.code])
     assert not app.error, [e.value for e in app.error]  # field comparison rendered from the checkpoint
