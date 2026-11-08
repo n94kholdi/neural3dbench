@@ -338,7 +338,7 @@ models:
       - Classification (mass-weighted mean) and per-vertex segmentation; small model (~0.5M params).
     demerits:
       - Needs per-mesh precomputation (cotangent Laplacian eigenbasis, gradients) with SciPy on the CPU.
-      - Not rotation invariant with xyz inputs; use heat-kernel signatures as node_features for invariance.
+      - Not rotation invariant with xyz inputs; set input_features="hks" (heat-kernel signatures) for invariance.
       - Very degenerate or non-manifold meshes give a poor cotangent Laplacian (no robust Laplacian here).
     complexity:
       time: O(L * (N * K * C + E * C + N * C^2))

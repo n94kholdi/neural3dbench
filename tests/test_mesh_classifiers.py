@@ -151,3 +151,50 @@ def test_simplify_mesh_caps_faces():
     small_v, small_f = simplify_mesh(vertices.numpy().astype(np.float64), faces.numpy(), 500)
     assert 0 < len(small_f) <= 500
     assert small_f.max() < len(small_v) and len(np.unique(small_f)) == len(small_v)
+
+
+def test_parse_obj_handles_refs_polygons_and_negative_indices():
+    from tools.dashboard.data_sources import parse_obj
+
+    vertices, faces = parse_obj("# c\nv 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nvn 0 0 1\nf 1/1/1 2/2/1 3/3/1 4/4/1\nf -4 -3 -2\n")
+    assert vertices.shape == (4, 3)
+    assert faces.tolist() == [[0, 1, 2], [0, 2, 3], [0, 1, 2]]
+    with pytest.raises(ValueError):
+        parse_obj("v 0 0 0\nf 1 2 3\n")
+
+
+def test_load_mesh_dataset_reads_tar_splits(tmp_path, monkeypatch):
+    import io
+    import tarfile
+
+    from tools.dashboard import data_sources, tasks
+
+    archive = tmp_path / "shrec_16.tar.gz"
+    obj = b"v 0 0 0\nv 1 0 0\nv 0 1 0\nv 0 0 1\nf 1 2 3\nf 1 2 4\nf 1 3 4\nf 2 3 4\n"
+    with tarfile.open(archive, "w:gz") as tar:
+        for name in ("shrec_16/ant/train/T1.obj", "shrec_16/ant/test/T2.obj", "shrec_16/cat/train/T3.obj"):
+            info = tarfile.TarInfo(name)
+            info.size = len(obj)
+            tar.addfile(info, io.BytesIO(obj))
+    monkeypatch.setattr(tasks, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(data_sources, "download", lambda *_: archive)
+    meshes, labels, names = data_sources.load_mesh_dataset("shrec11", "train")
+    assert names == ["ant", "cat"] and labels.tolist() == [0, 1]
+    assert meshes[0][1].shape == (4, 3) and np.linalg.norm(meshes[0][0], axis=1).max() == pytest.approx(1.0)
+    assert len(data_sources.load_mesh_dataset("shrec11", "test")[0]) == 1
+
+
+def test_diffusionnet_time_trains_and_hks_input():
+    model = create_model({"name": "diffusionnet", "output_dim": 4, **SMALL["diffusionnet"]})
+    model(batch()).predictions.sum().backward()
+    assert model.blocks[0].diffusion.diffusion_time.grad.abs().sum() > 0  # zero-initialised times must learn
+
+    hks = create_model({"name": "diffusionnet", "output_dim": 4, "input_features": "hks", **SMALL["diffusionnet"]})
+    rotation = torch.linalg.qr(torch.randn(3, 3))[0]
+    meshes = [TETRA, grid_mesh(8)]
+    rotated = collate_meshes([(v @ rotation.T, f) for v, f in meshes])
+    hks.eval()
+    with torch.no_grad():
+        assert torch.allclose(hks(collate_meshes(meshes)).predictions, hks(rotated).predictions, atol=1e-4)
+    with pytest.raises(ValueError):
+        DiffusionNetConfig(input_features="normals")

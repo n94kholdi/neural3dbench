@@ -57,7 +57,12 @@ MLflow 3 defaults `mlflow ui` to a SQLite store and rejects the file store unles
    | `deformed_sphere`, `poisson` | field regression | float `[B, N, 1]` | MSE | MAE |
    | `chair_parts` | part segmentation (seat, back, legs, armrests) | int `[B, N]` | per-point CE | accuracy, mIoU |
    | `primitive_shapes` | shape classification (sphere, cube, cylinder) | int `[B]` | CE | accuracy |
+   | `modelnet10_mesh`, `shrec11` | mesh classification (meshnet, diffusionnet, meshwalker only) | int `[B]` | CE | accuracy |
    | saved `.npz` datasets | from the arrays: `labels [B, N]`, `labels [B]` or `target` | | | |
+
+   Mesh datasets are lists of `(vertices [V, 3], faces [F, 3])`, collated per batch with `collate_meshes`;
+   they download on the first run (ModelNet10 473 MB, SHREC'11 3.2 MB). DiffusionNet operators are
+   computed once per run. *Points per sample* is ignored for them.
 
    Warnings appear when the dataset's task differs from the advisor problem, and when the model needs
    graph or voxel input (gcn, gat, meshgraphnet, fno3d, unet3d, gino, deep_nurbs); those cannot start.

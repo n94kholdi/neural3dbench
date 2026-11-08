@@ -1,10 +1,12 @@
-"""Train MeshNet, DiffusionNet or MeshWalker on ModelNet10/40 triangle meshes (no point sampling).
+"""Train MeshNet, DiffusionNet or MeshWalker on triangle meshes (no point sampling).
 
+Datasets: modelnet10, modelnet40 (Princeton) and shrec11 (SHREC'11, 600 meshes, 3.2 MB download).
 Uses the official train/test split. Meshes are decimated to at most ``--max-faces`` triangles and
 cached under ``$NEURAL3DBENCH_DATA/meshes`` (default ``~/.cache/neural3dbench``); the first run
 reads the archive and takes several minutes. DiffusionNet operators are cached next to the meshes.
 
     python examples/train_mesh_classifier.py --model meshnet --epochs 30
+    python examples/train_mesh_classifier.py --model diffusionnet --dataset shrec11 --epochs 50
     python examples/train_mesh_classifier.py --model diffusionnet --k-eig 64
     python examples/train_mesh_classifier.py --model meshwalker --config '{"gru_dims": [256, 256]}'
     python examples/train_mesh_classifier.py --model meshnet --max-per-class 20 --epochs 2  # quick check
@@ -28,7 +30,7 @@ from models import collate_meshes, create_model
 from models.diffusionnet import batch_operators, compute_operators
 from models.diffusionnet.model import OPERATOR_KEY
 from tools.dashboard import tasks
-from tools.dashboard.data_sources import load_modelnet_meshes
+from tools.dashboard.data_sources import MESH_DATASETS, load_mesh_dataset
 
 
 def progress(fraction: float, message: str) -> None:
@@ -68,7 +70,7 @@ def evaluate(model, meshes, labels, operators, batch_size: int) -> float:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--model", choices=("meshnet", "diffusionnet", "meshwalker"), required=True)
-    parser.add_argument("--variant", type=int, choices=(10, 40), default=10)
+    parser.add_argument("--dataset", choices=sorted(MESH_DATASETS), default="modelnet10")
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--lr", type=float, default=1e-3)
@@ -85,24 +87,24 @@ def main() -> None:
 
     split = {}
     for name in ("train", "test"):
-        split[name] = load_modelnet_meshes(args.variant, name, args.max_faces, args.max_per_class, args.seed, progress)
+        split[name] = load_mesh_dataset(args.dataset, name, args.max_faces, args.max_per_class, args.seed, progress)
     train_meshes, train_labels, class_names = split["train"]
     test_meshes, test_labels, _ = split["test"]
-    print(f"ModelNet{args.variant}: {len(train_meshes)} train / {len(test_meshes)} test meshes, {len(class_names)} classes, "
+    print(f"{args.dataset}: {len(train_meshes)} train / {len(test_meshes)} test meshes, {len(class_names)} classes, "
           f"median {int(np.median([len(f) for _, f in train_meshes]))} faces")
 
     config = {"name": args.model, "output_dim": len(class_names), **json.loads(args.config)}
     train_ops = test_ops = None
     if args.model == "diffusionnet":
         config.setdefault("k_eig", args.k_eig)
-        stem = f"modelnet{args.variant}_f{args.max_faces}_c{args.max_per_class or 'all'}_s{args.seed}_k{config['k_eig']}"
+        stem = f"{args.dataset}_f{args.max_faces}_c{args.max_per_class or 'all'}_s{args.seed}_k{config['k_eig']}"
         train_ops = diffusion_operators(train_meshes, config["k_eig"], tasks.DATA_DIR / "meshes" / f"{stem}_train_ops.pt")
         test_ops = diffusion_operators(test_meshes, config["k_eig"], tasks.DATA_DIR / "meshes" / f"{stem}_test_ops.pt")
     model = create_model(config).to(args.device)
     print(f"{args.model}: {sum(p.numel() for p in model.parameters()):,} parameters on {args.device}")
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, args.epochs)
-    checkpoint = args.checkpoint or Path("checkpoints") / f"{args.model}_modelnet{args.variant}.pt"
+    checkpoint = args.checkpoint or Path("checkpoints") / f"{args.model}_{args.dataset}.pt"
 
     best = -1.0
     for epoch in range(1, args.epochs + 1):

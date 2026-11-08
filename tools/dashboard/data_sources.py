@@ -11,19 +11,22 @@ source          task                  origin                                    
 ShapeNetPart    part segmentation     Hugging Face mirror of the Stanford benchmark    707 MB
 ModelNet10      shape classification  Princeton ModelNet (OFF meshes, points sampled)  473 MB
 ModelNet40      shape classification  Princeton ModelNet (OFF meshes, points sampled)  2.0 GB
+SHREC'11        mesh classification   MeshCNN mirror (OBJ meshes, 500 faces each)       3.2 MB
 =============== ===================== ================================================ ========
 """
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import io
 import re
+import tarfile
 import urllib.request
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Iterator
 
 import numpy as np
 
@@ -53,6 +56,13 @@ MODELNET = {
     10: Archive("ModelNet10.zip", ("http://3dvision.princeton.edu/projects/2014/3DShapeNets/ModelNet10.zip",), 473_402_300),
     40: Archive("ModelNet40.zip", ("http://modelnet.cs.princeton.edu/ModelNet40.zip",), 2_039_180_837),
 }
+# SHREC'11 as prepared by MeshCNN: 30 classes x 20 meshes (16 train / 4 test), simplified to 500 faces.
+SHREC11 = Archive(
+    "shrec_16.tar.gz",
+    ("https://www.dropbox.com/s/w16st84r6wc57u7/shrec_16.tar.gz?dl=1",),
+    3_225_763,
+    "fed18e701e1d3b4e7882b6eaca8640421e23e3ef9443fa6058dfaf9d704f18ae",
+)
 
 # Global part-id ranges per ShapeNetPart category (50 parts in total), as in the PointNet++ reference code.
 SHAPENET_PART_RANGES = {
@@ -137,6 +147,26 @@ def parse_off(text: str) -> tuple[np.ndarray, np.ndarray]:
         polygon = index[1 : 1 + index[0]]
         triangles += [[polygon[0], polygon[i], polygon[i + 1]] for i in range(1, len(polygon) - 1)]
     return vertices, np.asarray(triangles, dtype=np.int64).reshape(-1, 3)
+
+
+def parse_obj(text: str) -> tuple[np.ndarray, np.ndarray]:
+    """Wavefront OBJ -> ``(vertices [V, 3], triangles [F, 3])``; ``f a/b/c`` refs and polygons are handled."""
+    vertices, triangles = [], []
+    for line in text.splitlines():
+        parts = line.split()
+        if not parts:
+            continue
+        if parts[0] == "v":
+            vertices.append([float(x) for x in parts[1:4]])
+        elif parts[0] == "f":
+            polygon = [int(p.split("/")[0]) for p in parts[1:]]
+            polygon = [i - 1 if i > 0 else len(vertices) + i for i in polygon]  # 1-based or negative
+            triangles += [[polygon[0], polygon[i], polygon[i + 1]] for i in range(1, len(polygon) - 1)]
+    vertices = np.asarray(vertices, dtype=np.float64).reshape(-1, 3)
+    triangles = np.asarray(triangles, dtype=np.int64).reshape(-1, 3)
+    if len(triangles) and (triangles.min() < 0 or triangles.max() >= len(vertices)):
+        raise ValueError("OBJ face index out of range.")
+    return vertices, triangles
 
 
 def sample_surface(vertices: np.ndarray, triangles: np.ndarray, count: int, rng: np.random.Generator) -> np.ndarray:
@@ -259,40 +289,66 @@ def simplify_mesh(vertices: np.ndarray, triangles: np.ndarray, max_faces: int) -
     return vertices, triangles
 
 
-def load_modelnet_meshes(
-    variant: int = 10, split: str = "train", max_faces: int = 2048, max_per_class: int | None = None,
+# Mesh datasets read by examples/train_mesh_classifier.py; members are ``<class>/<split>/<file>``.
+MESH_DATASETS: dict[str, tuple[Archive, str, Callable[[str], tuple[np.ndarray, np.ndarray]]]] = {
+    "modelnet10": (MODELNET[10], ".off", parse_off),
+    "modelnet40": (MODELNET[40], ".off", parse_off),
+    "shrec11": (SHREC11, ".obj", parse_obj),
+}
+
+
+@contextlib.contextmanager
+def _open_archive(path: Path, suffix: str) -> Iterator[tuple[list[str], Callable[[str], bytes]]]:
+    """``(names ending in suffix, read)`` for a zip or tar, read in place and never extracted."""
+    if path.suffix == ".zip":
+        with zipfile.ZipFile(path) as archive:
+            yield [n for n in archive.namelist() if n.endswith(suffix) and "__MACOSX" not in n], archive.read
+        return
+    with tarfile.open(path) as archive:
+        members = {m.name: m for m in archive.getmembers() if m.isfile() and m.name.endswith(suffix)}
+        yield list(members), lambda name: archive.extractfile(members[name]).read()
+
+
+def mesh_cache_path(name: str, split: str, max_faces: int = 2048, max_per_class: int | None = None, seed: int = 0) -> Path:
+    """Where ``load_mesh_dataset`` caches one split; it exists once the split has been read."""
+    return tasks.DATA_DIR / "meshes" / f"{name}_{split}_f{max_faces}_c{max_per_class or 'all'}_s{seed}.npz"
+
+
+def load_mesh_dataset(
+    name: str = "modelnet10", split: str = "train", max_faces: int = 2048, max_per_class: int | None = None,
     seed: int = 0, progress: Progress | None = None,
 ) -> tuple[list[tuple[np.ndarray, np.ndarray]], np.ndarray, list[str]]:
-    """ModelNet meshes of one official split as ``([(vertices [V, 3], faces [F, 3]), ...], labels [B], class_names)``.
+    """Meshes of one official split as ``([(vertices [V, 3], faces [F, 3]), ...], labels [B], class_names)``.
 
-    Meshes are centered on their bounding box, scaled into the unit sphere and decimated to at most
-    ``max_faces`` triangles (``simplify_mesh``). The result is cached under ``DATA_DIR/meshes``.
+    ``name`` is a key of ``MESH_DATASETS``. Meshes are centered on their bounding box, scaled into the
+    unit sphere and decimated to at most ``max_faces`` triangles (``simplify_mesh``). The result is
+    cached under ``DATA_DIR/meshes``.
     """
-    if variant not in MODELNET or split not in ("train", "test"):
-        raise ValueError("variant must be 10 or 40 and split 'train' or 'test'.")
-    cache = tasks.DATA_DIR / "meshes" / f"modelnet{variant}_{split}_f{max_faces}_c{max_per_class or 'all'}_s{seed}.npz"
+    if name not in MESH_DATASETS or split not in ("train", "test"):
+        raise ValueError(f"name must be one of {sorted(MESH_DATASETS)} and split 'train' or 'test'.")
+    archive, suffix, parse = MESH_DATASETS[name]
+    cache = mesh_cache_path(name, split, max_faces, max_per_class, seed)
     if not cache.is_file():
-        path = download(MODELNET[variant], progress)
+        path = download(archive, progress)
         rng = np.random.default_rng(seed)
-        with zipfile.ZipFile(path) as archive:
-            members = sorted(n for n in archive.namelist()
-                             if n.endswith(".off") and "__MACOSX" not in n and n.split("/")[-2] == split)
-            class_names = sorted({n.split("/")[-3] for n in members})
+        with _open_archive(path, suffix) as (names, read):
+            names = [n for n in names if n.split("/")[-2] == split]
+            class_names = sorted({n.split("/")[-3] for n in names})
             chosen = [m for c in class_names
-                      for m in sorted(rng.permutation([n for n in members if n.split("/")[-3] == c])[: max_per_class or None])]
+                      for m in sorted(rng.permutation(sorted(n for n in names if n.split("/")[-3] == c))[: max_per_class or None])]
             vertices, faces, labels = [], [], []
             for i, member in enumerate(chosen):
                 try:
-                    verts, tris = parse_off(archive.read(member).decode("ascii", errors="replace"))
+                    verts, tris = parse(read(member).decode("ascii", errors="replace"))
                     verts = verts - (verts.min(0) + verts.max(0)) / 2
                     verts = verts / max(float(np.linalg.norm(verts, axis=1).max()), 1e-12)
                     verts, tris = simplify_mesh(verts, tris, max_faces)
                 except ValueError:
-                    continue  # a few ModelNet meshes are degenerate
+                    continue  # a few meshes are degenerate
                 vertices.append(verts.astype(np.float32))
                 faces.append(tris.astype(np.int64))
                 labels.append(class_names.index(member.split("/")[-3]))
-                _report(progress, (i + 1) / len(chosen), f"Reading ModelNet{variant} {split}: {i + 1} / {len(chosen)} meshes")
+                _report(progress, (i + 1) / len(chosen), f"Reading {name} {split}: {i + 1} / {len(chosen)} meshes")
         cache.parent.mkdir(parents=True, exist_ok=True)
         np.savez_compressed(
             cache, vertices=np.concatenate(vertices), faces=np.concatenate(faces),

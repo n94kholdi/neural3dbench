@@ -162,7 +162,11 @@ DOWNLOADS = {
     "shapenet_part": "ShapeNetPart: part segmentation, 16 categories (707 MB)",
     "modelnet10": "ModelNet10: shape classification, 10 classes (473 MB)",
     "modelnet40": "ModelNet40: shape classification, 40 classes (2.0 GB)",
+    "modelnet10_mesh": "ModelNet10 meshes: mesh classification, 10 classes (473 MB)",
+    "shrec11": "SHREC'11 meshes: mesh classification, 30 classes (3.2 MB)",
 }
+# Mesh downloads: dashboard dataset name -> data_sources.MESH_DATASETS key.
+MESH_DOWNLOADS = {"modelnet10_mesh": "modelnet10", "shrec11": "shrec11"}
 
 SAMPLES = {
     "shape:sphere": "Sphere (examples/train_pointnet_synthetic.py)",
@@ -265,6 +269,8 @@ def mlflow_client(tracking_uri: str) -> Any:
 def predict_sample(checkpoint_path: str, config: Any, sample: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Reload a checkpoint and predict one validation sample: ``(coords [N, 3], target, raw model output)``.
 
+    For a mesh dataset ``coords`` is ``(vertices [V, 3], faces [F, 3])``.
+
     Target and output shapes follow the dataset's task (see ``tools.dashboard.tasks``), without the batch dim.
     """
     from models import ModelRegistry
@@ -276,10 +282,10 @@ def predict_sample(checkpoint_path: str, config: Any, sample: int) -> tuple[np.n
     model.load_state_dict(checkpoint["state_dict"])
     model.eval()
     coords, target = make_synthetic_dataset(config)  # validation samples are the first rows, as in TrainingWorker
-    x = coords[sample : sample + 1]
     with torch.no_grad():
-        pred = tasks.forward(tasks.DATASETS[config.dataset].task, model, x)
-    return x[0].numpy(), target[sample].numpy(), pred[0].numpy()
+        pred = tasks.forward(tasks.DATASETS[config.dataset].task, model, tasks.model_input(coords, [sample]))
+    geometry = coords[sample] if tasks.DATASETS[config.dataset].mesh else coords[sample].numpy()
+    return geometry, target[sample].numpy(), pred[0].numpy()
 
 
 def num_validation_samples(config: Any) -> int:
@@ -294,7 +300,14 @@ def main() -> None:
 
     from models import ModelRegistry
     from tools.dashboard.advisor_bridge import AdvisorBridge
-    from tools.dashboard.data_sources import SHAPENET_PART_RANGES, import_modelnet, import_shapenet_part, suggest_name
+    from tools.dashboard.data_sources import (
+        SHAPENET_PART_RANGES,
+        import_modelnet,
+        import_shapenet_part,
+        load_mesh_dataset,
+        mesh_cache_path,
+        suggest_name,
+    )
     from tools.dashboard.tasks import (
         BUILTIN_DATASETS,
         DATA_DIR,
@@ -622,7 +635,10 @@ def main() -> None:
             st.caption(f"Archives and converted datasets are cached in `{DATA_DIR}` (set `NEURAL3DBENCH_DATA` to move it).")
             source = st.selectbox("Dataset", list(DOWNLOADS), format_func=DOWNLOADS.get)
             c1, c2, c3 = st.columns(3)
-            if source == "shapenet_part":
+            if source in MESH_DOWNLOADS:
+                c1.caption("Meshes are kept whole (no point sampling), decimated to at most 2048 faces. "
+                           "Train them with meshnet, diffusionnet or meshwalker.")
+            elif source == "shapenet_part":
                 category = c1.selectbox("Category", [*SHAPENET_PART_RANGES, "All"])
                 points = c2.number_input("Points per shape", 256, 8192, 2048, step=256)
                 limit = c3.number_input("Max shapes (0 = all)", 0, 20_000, 500, step=100)
@@ -636,7 +652,10 @@ def main() -> None:
                     bar.progress(fraction, text=message)
 
                 try:
-                    if source == "shapenet_part":
+                    if source in MESH_DOWNLOADS:
+                        load_mesh_dataset(MESH_DOWNLOADS[source], "train", progress=report)
+                        dataset = DATASETS[source]
+                    elif source == "shapenet_part":
                         dataset = import_shapenet_part(category, int(points), int(limit) or None, progress=report)
                     else:
                         dataset = import_modelnet(int(source[-2:]), int(points), int(limit) or None, progress=report)
@@ -645,6 +664,13 @@ def main() -> None:
                 else:
                     st.session_state["train_dataset"] = dataset.name
                     st.success(f"Registered `{dataset.name}`: {dataset.description} Selected in the Training tab.")
+            if source in MESH_DOWNLOADS and mesh_cache_path(MESH_DOWNLOADS[source], "train").is_file():
+                meshes, labels, class_names = load_mesh_dataset(MESH_DOWNLOADS[source], "train")
+                st.caption(f"`{source}` is ready: {len(meshes)} training meshes, {len(class_names)} classes.")
+                index = st.slider("Mesh", 0, len(meshes) - 1, 0, key=f"mesh_preview_{source}")
+                vertices, faces = meshes[index]
+                st.plotly_chart(plot_mesh(vertices, faces, title=f"{class_names[labels[index]]}: "
+                                          f"{len(vertices):,} vertices, {len(faces):,} faces"), width="stretch")
 
         else:
             st.caption("One `.npz` with `coords [B, N, 3]` and `labels` (`[B, N]` part ids or `[B]` class ids) or a "
@@ -729,6 +755,10 @@ def main() -> None:
         mismatch = cached_input_mismatch(st.session_state["train_model"], chosen.name)
         if mismatch:
             st.warning(mismatch)
+        if chosen.mesh and st.session_state["train_samples"] < 10 * chosen.num_classes:
+            st.warning(f"{st.session_state['train_samples']} samples for {chosen.num_classes} classes is too few to learn; "
+                       f"raise Samples (Advanced) to {16 * chosen.num_classes} or more. For diffusionnet add "
+                       '`{"input_features": "hks"}` to the config overrides (rotation invariant input).')
         problem = st.session_state.get("problem_dataset")
         if problem and DATASETS[problem].task != chosen.task:
             st.warning(f"The advisor problem is {DATASETS[problem].task.replace('_', ' ')}, but `{chosen.name}` "

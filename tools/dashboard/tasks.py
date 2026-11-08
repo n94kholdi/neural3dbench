@@ -16,6 +16,10 @@ shape_completion     complete cloud ``[B, N, 3]``  Chamfer (squared L2)    Chamf
 Per-point models without a global head (mlp, siren, ...) are mean-pooled over points for
 shape classification. Completion models (pcn, foldingnet) take the partial cloud and return a
 new point set ``[B, M, 3]``; M need not equal N.
+
+Mesh datasets (``Dataset.mesh``: modelnet10_mesh, shrec11) cannot be stacked into ``[B, N, 3]``: they
+hold a list of ``(vertices [V_i, 3], faces [F_i, 3])`` that ``model_input`` joins per batch with
+``collate_meshes``. Only mesh models (meshnet, diffusionnet, meshwalker) train on them.
 """
 
 from __future__ import annotations
@@ -34,7 +38,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-from models import ModelInput, ModelOutput, ModelRegistry
+from models import ModelInput, ModelOutput, ModelRegistry, collate_meshes
 
 FIELD_REGRESSION = "field_regression"
 PART_SEGMENTATION = "part_segmentation"
@@ -47,7 +51,10 @@ Generator = Callable[[int, int, torch.Generator], tuple[torch.Tensor, torch.Tens
 
 @dataclass(frozen=True)
 class Dataset:
-    """A data source: ``make(num_samples, num_points, generator) -> (coords [B, N, 3], target)``."""
+    """A data source: ``make(num_samples, num_points, generator) -> (coords [B, N, 3], target)``.
+
+    With ``mesh``, ``coords`` is a list of ``(vertices [V, 3], faces [F, 3])`` and ``num_points`` is ignored.
+    """
 
     name: str
     task: str
@@ -56,6 +63,7 @@ class Dataset:
     class_names: tuple[str, ...] = ()
     field_name: str = "value"
     class_colors: tuple[str, ...] = ()  # hex per class; empty means the default palette
+    mesh: bool = False
 
     @property
     def num_classes(self) -> int:
@@ -163,6 +171,35 @@ def _cut_side(full: torch.Tensor, generator: torch.Generator) -> tuple[torch.Ten
     return partial, full
 
 
+# ---------------------------------------------------------------- mesh data (downloaded on first use)
+
+MODELNET10_CLASSES = ("bathtub", "bed", "chair", "desk", "dresser", "monitor", "night_stand", "sofa", "table", "toilet")
+SHREC11_CLASSES = (
+    "alien", "ants", "armadillo", "bird1", "bird2", "camel", "cat", "centaur", "dino_ske", "dinosaur", "dog1", "dog2",
+    "flamingo", "glasses", "gorilla", "hand", "horse", "lamp", "laptop", "man", "myScissor", "octopus", "pliers",
+    "rabbit", "santa", "shark", "snake", "spiders", "two_balls", "woman",
+)
+
+
+def _mesh_make(source: str) -> Generator:
+    """``num_samples`` random meshes of the official train split of ``data_sources.MESH_DATASETS[source]``.
+
+    Returns ``([(vertices [V, 3], faces [F, 3]), ...], labels [B])``. The first call downloads and
+    decimates the whole split (cached under ``DATA_DIR/meshes``; the Data tab does this with progress).
+    """
+
+    def make(num_samples: int, num_points: int, generator: torch.Generator) -> tuple[list, torch.Tensor]:
+        from tools.dashboard.data_sources import load_mesh_dataset  # data_sources imports this module
+
+        meshes, labels, _ = load_mesh_dataset(source, "train")
+        if len(meshes) < num_samples:
+            raise ValueError(f"{source} has only {len(meshes)} training meshes; lower the sample count.")
+        rows = torch.randperm(len(meshes), generator=generator)[:num_samples].tolist()
+        return [meshes[i] for i in rows], torch.as_tensor(labels[rows]).long()
+
+    return make
+
+
 DATASETS: dict[str, Dataset] = {
     d.name: d
     for d in (
@@ -176,6 +213,12 @@ DATASETS: dict[str, Dataset] = {
                 _primitive_shapes, class_names=PRIMITIVES),
         Dataset("partial_shapes", SHAPE_COMPLETION, "Primitive shapes with a random side cut away; complete the cloud.",
                 _partial_shapes),
+        Dataset("modelnet10_mesh", SHAPE_CLASSIFICATION,
+                "ModelNet10 triangle meshes (473 MB download on first use, <= 2048 faces); classify the shape.",
+                _mesh_make("modelnet10"), class_names=MODELNET10_CLASSES, mesh=True),
+        Dataset("shrec11", SHAPE_CLASSIFICATION,
+                "SHREC'11 triangle meshes, 30 classes x 16 training meshes (3.2 MB download); classify the shape.",
+                _mesh_make("shrec11"), class_names=SHREC11_CLASSES, mesh=True),
     )
 }
 
@@ -332,9 +375,40 @@ BUILTIN_DATASETS = frozenset(DATASETS)
 register_cached_datasets()
 
 
-def make_dataset(name: str, num_samples: int, num_points: int, seed: int = 0) -> tuple[torch.Tensor, torch.Tensor]:
-    """Return ``(coords [B, N, 3], target)`` for dataset ``name``; target shape depends on its task."""
+def make_dataset(name: str, num_samples: int, num_points: int, seed: int = 0) -> tuple[torch.Tensor | list, torch.Tensor]:
+    """Return ``(coords [B, N, 3], target)`` for dataset ``name``; target shape depends on its task.
+
+    Mesh datasets return a list of ``(vertices, faces)`` instead of ``coords``.
+    """
     return DATASETS[name].make(num_samples, num_points, torch.Generator().manual_seed(seed))
+
+
+def attach_operators(model: nn.Module, meshes: list) -> list:
+    """For DiffusionNet, precompute each mesh's operators once as a third tuple item.
+
+    Without them the model recomputes the eigenbasis of every mesh on every forward pass.
+    """
+    k_eig = getattr(model.config, "k_eig", None)
+    if k_eig is None:
+        return meshes
+    from models.diffusionnet import compute_operators
+
+    return [(v, f, compute_operators(v, f, k_eig)) for v, f in meshes]
+
+
+def model_input(data: torch.Tensor | list, index: Any) -> torch.Tensor | ModelInput:
+    """Rows ``index`` of a dataset as model input: a tensor slice, or for meshes ``collate_meshes``
+    plus the DiffusionNet operators that ``attach_operators`` stored."""
+    if isinstance(data, torch.Tensor):
+        return data[index]
+    meshes = [data[int(i)] for i in index]
+    inputs = collate_meshes([m[:2] for m in meshes])
+    if len(meshes[0]) > 2:
+        from models.diffusionnet import batch_operators
+        from models.diffusionnet.model import OPERATOR_KEY
+
+        inputs.metadata[OPERATOR_KEY] = batch_operators([m[2] for m in meshes])
+    return inputs
 
 
 # ---------------------------------------------------------------- advisor -> training contract
@@ -385,13 +459,19 @@ def input_mismatch(model_name: str, dataset_name: str | None = None) -> str | No
             if completion:
                 return f"`{dataset_name}` is shape completion; train it with a completion model (pcn, foldingnet)."
             return f"`{model_name}` outputs a new point set; train it on a shape-completion dataset (partial_shapes)."
+    capabilities = ModelRegistry.create(model_name).capabilities
+    if dataset_name is not None and DATASETS[dataset_name].mesh:
+        if capabilities.representation == "MESH":
+            return None
+        return f"`{dataset_name}` holds triangle meshes; train it with a mesh model (meshnet, diffusionnet, meshwalker)."
     if hasattr(ModelRegistry.get(model_name), "detection_loss"):
         return (f"`{model_name}` is a 3D box detector; the dashboard has no box-labelled dataset. "
                 f"Train it with `model.detection_loss` (see docs/{model_name}.md).")
     if hasattr(ModelRegistry.get(model_name), "registration_loss"):
         return (f"`{model_name}` registers two clouds; the dashboard has no paired dataset with ground-truth poses. "
                 f"Train it with `model.registration_loss` (see docs/{model_name}.md).")
-    capabilities = ModelRegistry.create(model_name).capabilities
+    if capabilities.representation == "MESH":
+        return f"`{model_name}` takes triangle meshes; train it on a mesh dataset (modelnet10_mesh, shrec11)."
     extra = sorted(set(capabilities.requires) - {"coordinates"})
     if capabilities.representation == "POINT_CLOUD" and not extra:
         return None
@@ -401,16 +481,19 @@ def input_mismatch(model_name: str, dataset_name: str | None = None) -> str | No
             "(pointnet, pointnet2, dgcnn, pointnext, transolver, mlp, siren).")
 
 
-def forward(task: str, model: nn.Module, coords: torch.Tensor) -> torch.Tensor:
-    """Run the model; returns ``[B, C]`` logits for shape classification, else ``[B, N, C]``."""
-    output = model(ModelInput(coordinates=coords))
+def forward(task: str, model: nn.Module, coords: torch.Tensor | ModelInput) -> torch.Tensor:
+    """Run the model on ``coords [B, N, 3]`` (or a ready ``ModelInput``, e.g. collated meshes).
+
+    Returns ``[B, C]`` logits for shape classification, else ``[B, N, C]``.
+    """
+    output = model(coords if isinstance(coords, ModelInput) else ModelInput(coordinates=coords))
     predictions = output.predictions if isinstance(output, ModelOutput) else output
     if task == SHAPE_COMPLETION:
         return predictions  # [B, M, 3], M set by the model
     if task == SHAPE_CLASSIFICATION:
         if predictions.ndim == 3:  # per-point model: pool the point logits into one shape logit
             predictions = predictions.mean(dim=1)
-        return predictions.reshape(coords.shape[0], -1)
+        return predictions.reshape(predictions.shape[0], -1)
     return predictions.reshape(coords.shape[0], coords.shape[1], -1)
 
 
@@ -455,7 +538,8 @@ def metrics(task: str, pred: torch.Tensor, target: torch.Tensor, num_classes: in
 
 
 def evaluation_figure(dataset: Dataset, coords: Any, target: Any, pred: Any) -> Any:
-    """Plotly preview of one sample: ``coords [N, 3]``, its target and the raw model output (no batch dim)."""
+    """Plotly preview of one sample: ``coords [N, 3]`` (``(vertices, faces)`` for a mesh dataset), its target
+    and the raw model output (no batch dim)."""
     from tools.dashboard import visualizer  # plotly only needed here
 
     pred = torch.as_tensor(pred)
@@ -469,4 +553,7 @@ def evaluation_figure(dataset: Dataset, coords: Any, target: Any, pred: Any) -> 
     probs = pred.softmax(-1)
     true, guess = dataset.class_names[int(target)], dataset.class_names[int(probs.argmax())]
     verdict = "correct" if true == guess else "wrong"
-    return visualizer.plot_point_cloud(coords, title=f"True: {true} · predicted: {guess} ({probs.max():.0%}, {verdict})")
+    title = f"True: {true} · predicted: {guess} ({probs.max():.0%}, {verdict})"
+    if dataset.mesh:
+        return visualizer.plot_mesh(*coords, title=title)
+    return visualizer.plot_point_cloud(coords, title=title)

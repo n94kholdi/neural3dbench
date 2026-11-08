@@ -128,3 +128,34 @@ def test_completion_model_rejects_field_dataset(tmp_path: Path, monkeypatch: pyt
     monkeypatch.chdir(tmp_path)
     with pytest.raises(ValueError, match="shape-completion"):
         Trainer().start_training({"model_name": "pcn", "dataset": "deformed_sphere"})
+
+
+def _bumpy_grids(num_samples: int, num_points: int, generator: torch.Generator) -> tuple[list, torch.Tensor]:
+    """Grid meshes of varying size, flat (class 0) or bumped (class 1); ``num_points`` is ignored like real mesh data."""
+    meshes, labels = [], torch.arange(num_samples) % 2
+    for i in range(num_samples):
+        n = 5 + i % 3
+        u, v = torch.meshgrid(torch.linspace(0, 1, n), torch.linspace(0, 1, n), indexing="ij")
+        vertices = torch.stack((u.ravel(), v.ravel(), 0.3 * labels[i] * torch.sin(3 * u.ravel())), dim=1)
+        faces = [[a, a + 1, a + n] for a in range(n * n - n) if a % n < n - 1]
+        faces += [[a + 1, a + n + 1, a + n] for a in range(n * n - n) if a % n < n - 1]
+        meshes.append((vertices.numpy(), torch.tensor(faces).numpy()))
+    return meshes, labels
+
+
+@pytest.mark.parametrize(("model_name", "model_config"), [("meshnet", {"num_kernel": 8}),
+                                                          ("diffusionnet", {"width": 16, "num_blocks": 2, "k_eig": 8})])
+def test_mesh_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, model_name: str, model_config: dict) -> None:
+    pytest.importorskip("scipy")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setitem(tasks.DATASETS, "grids", tasks.Dataset("grids", tasks.SHAPE_CLASSIFICATION, "test meshes",
+                                                               _bumpy_grids, class_names=("flat", "bumpy"), mesh=True))
+    assert tasks.input_mismatch(model_name, "grids") is None and tasks.input_mismatch("pointnet", "grids")
+    assert tasks.input_mismatch(model_name, "primitive_shapes")
+    trainer = Trainer()
+    trainer.start_training({"model_name": model_name, "model_config": model_config, "dataset": "grids", "epochs": 2,
+                            "batch_size": 4, "num_samples": 12, "experiment_name": "test-mesh"})
+    status = trainer.wait(timeout=300)
+    assert status["status"] == "completed", status["error"]
+    run = mlflow.MlflowClient().get_run(status["run_id"])
+    assert "val_accuracy" in run.data.metrics

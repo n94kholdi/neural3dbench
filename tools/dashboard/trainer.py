@@ -12,8 +12,9 @@ Usage::
     trainer.stop_training()
 
 Synthetic datasets (no files needed, see ``tools.dashboard.tasks.DATASETS``) feed
-``ModelInput(coordinates=[B, N, 3])``. The dataset's task sets the model head, loss and
-metrics: field regression, part segmentation or shape classification.
+``ModelInput(coordinates=[B, N, 3])``; mesh datasets are joined per batch with
+``collate_meshes`` (``tasks.model_input``). The dataset's task sets the model head, loss and
+metrics: field regression, part segmentation, shape classification or shape completion.
 """
 
 from __future__ import annotations
@@ -72,7 +73,7 @@ class TrainingConfig:
             raise ValueError("learning_rate must be positive.")
 
 
-def make_synthetic_dataset(config: TrainingConfig) -> tuple[torch.Tensor, torch.Tensor]:
+def make_synthetic_dataset(config: TrainingConfig) -> tuple[torch.Tensor | list, torch.Tensor]:
     """Return ``(coordinates [B, N, 3], target)`` for ``config.dataset``; target shape follows its task."""
     return tasks.make_dataset(config.dataset, config.num_samples, config.num_points, config.seed)
 
@@ -120,10 +121,14 @@ class TrainingWorker(threading.Thread):
         n_val = max(1, int(round(cfg.num_samples * cfg.val_fraction)))
         if n_val >= cfg.num_samples:
             raise ValueError("num_samples too small for a train/val split.")
-        train_x, val_x = coords[n_val:].to(device), coords[:n_val].to(device)
-        train_y, val_y = target[n_val:].to(device), target[:n_val].to(device)
-
         model = build_model(cfg).to(device)
+        if dataset.mesh:  # a list of (vertices, faces); model_input collates each batch
+            coords = tasks.attach_operators(model, coords)
+            train_x, val_x = coords[n_val:], coords[:n_val]
+        else:
+            train_x, val_x = coords[n_val:].to(device), coords[:n_val].to(device)
+        train_y, val_y = target[n_val:].to(device), target[:n_val].to(device)
+        val_input = tasks.model_input(val_x, range(len(val_x)))
         optimizer = _OPTIMIZERS[cfg.optimizer.lower()](model.parameters(), lr=cfg.learning_rate)
 
         mlflow.set_tracking_uri(_resolve_tracking_uri(cfg.tracking_uri))
@@ -148,7 +153,7 @@ class TrainingWorker(threading.Thread):
                     if len(index) == 1 and start:  # BatchNorm cannot train on one sample; drop a 1-sample tail
                         continue
                     optimizer.zero_grad()
-                    loss = tasks.loss(task, tasks.forward(task, model, train_x[index]), train_y[index])
+                    loss = tasks.loss(task, tasks.forward(task, model, tasks.model_input(train_x, index)), train_y[index])
                     loss.backward()
                     optimizer.step()
                     total += loss.item() * len(index)
@@ -157,7 +162,7 @@ class TrainingWorker(threading.Thread):
 
                 model.eval()
                 with torch.no_grad():
-                    val_pred = tasks.forward(task, model, val_x)
+                    val_pred = tasks.forward(task, model, val_input)
                     val_loss = tasks.loss(task, val_pred, val_y).item()
                     val_metrics = tasks.metrics(task, val_pred, val_y, dataset.num_classes)
                 mlflow.log_metrics(
@@ -170,17 +175,19 @@ class TrainingWorker(threading.Thread):
             checkpoint.parent.mkdir(parents=True, exist_ok=True)
             torch.save({"model_name": cfg.model_name, "config": asdict(model.config), "state_dict": model.state_dict()}, checkpoint)
             mlflow.log_artifact(str(checkpoint), artifact_path="checkpoints")
-            self._log_evaluation_html(model, dataset, val_x[:1], val_y[:1])
+            self._log_evaluation_html(model, dataset, val_x, val_y)
             stopped = self.stop_event.is_set()
             mlflow.set_tag("stopped_early", str(stopped))
 
         self.trainer._update(status="completed", checkpoint_path=str(checkpoint), stopped=stopped)
 
-    def _log_evaluation_html(self, model: nn.Module, dataset: tasks.Dataset, coords: torch.Tensor, target: torch.Tensor) -> None:
+    def _log_evaluation_html(self, model: nn.Module, dataset: tasks.Dataset, data: torch.Tensor | list, target: torch.Tensor) -> None:
+        """Preview of the first validation sample."""
         model.eval()
         with torch.no_grad():
-            pred = tasks.forward(dataset.task, model, coords)
-        figure = tasks.evaluation_figure(dataset, coords[0].cpu().numpy(), target[0].cpu(), pred[0].cpu())
+            pred = tasks.forward(dataset.task, model, tasks.model_input(data, [0]))
+        sample = data[0][:2] if dataset.mesh else data[0].cpu().numpy()
+        figure = tasks.evaluation_figure(dataset, sample, target[0].cpu(), pred[0].cpu())
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "evaluation.html"
             figure.write_html(path, include_plotlyjs="cdn")

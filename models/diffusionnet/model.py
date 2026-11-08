@@ -15,13 +15,17 @@ from models.types import ModelCapabilities, ModelInput, ModelOutput
 from .operators import batch_operators, compute_operators
 
 OPERATOR_KEY = "diffusion_operators"
+HKS_SCALES = 16  # heat-kernel signature times, log-spaced in [0.01, 1] as in the reference code
 
 
 @dataclass
 class DiffusionNetConfig(BaseModelConfig):
     """DiffusionNet on triangle meshes, for shape classification or per-vertex segmentation.
 
-    input_dim: per-vertex input channels (3 = xyz, the default when node_features is omitted).
+    input_dim: per-vertex input channels of ``node_features`` (3 = xyz, the default input).
+    input_features: what the model reads when ``node_features`` is omitted: ``xyz`` or ``hks``
+    (16-scale heat-kernel signature from the operators; rotation invariant, the paper's choice for
+    shape classification).
     width: channels of every block. k_eig: Laplacian eigenvectors used for spectral diffusion.
     task: classification (mass-weighted mean over vertices, ``[B, output_dim]``) or segmentation
     (``[V, output_dim]``).
@@ -34,6 +38,7 @@ class DiffusionNetConfig(BaseModelConfig):
     k_eig: int = 128
     dropout: float = 0.5
     task: str = "classification"
+    input_features: str = "xyz"
     with_gradient_features: bool = True
     with_gradient_rotations: bool = True
     representation: str = "MESH"
@@ -46,10 +51,20 @@ class DiffusionNetConfig(BaseModelConfig):
         for key in ("input_dim", "output_dim", "width", "num_blocks", "k_eig"):
             if getattr(self, key) <= 0:
                 raise ValueError(f"{key} must be positive.")
+        self.input_features = self.input_features.lower()
+        if self.input_features not in {"xyz", "hks"}:
+            raise ValueError("input_features must be 'xyz' or 'hks'.")
         if self.task not in {"classification", "segmentation"}:
             raise ValueError("task must be 'classification' or 'segmentation'.")
         if not 0.0 <= self.dropout < 1.0:
             raise ValueError("dropout must be in the range [0, 1).")
+
+
+def heat_kernel_signature(ops: dict[str, torch.Tensor], offsets: list[int]) -> torch.Tensor:
+    """``[V, HKS_SCALES]``: ``sum_k exp(-lambda_k t) phi_k(v)^2`` per mesh, t log-spaced in [0.01, 1]."""
+    times = torch.logspace(-2, 0, HKS_SCALES, device=ops["evecs"].device, dtype=ops["evecs"].dtype)
+    return torch.cat([ops["evecs"][start:end].square() @ torch.exp(-ops["evals"][b, :, None] * times)
+                      for b, (start, end) in enumerate(zip(offsets[:-1], offsets[1:]))])
 
 
 class LearnedTimeDiffusion(nn.Module):
@@ -60,7 +75,11 @@ class LearnedTimeDiffusion(nn.Module):
         self.diffusion_time = nn.Parameter(torch.zeros(width))
 
     def forward(self, x: torch.Tensor, ops: dict[str, torch.Tensor], offsets: list[int]) -> torch.Tensor:
-        time = self.diffusion_time.clamp_min(1e-8)
+        # Clamp the stored value, not the graph: clamp_min has zero gradient below the bound, so the
+        # zero-initialised times would never train.
+        with torch.no_grad():
+            self.diffusion_time.clamp_(min=1e-8)
+        time = self.diffusion_time
         out = []
         for b, (start, end) in enumerate(zip(offsets[:-1], offsets[1:])):
             evecs = ops["evecs"][start:end]
@@ -121,7 +140,7 @@ class DiffusionNet(BaseNetwork):
     def __init__(self, config: DiffusionNetConfig | None = None):
         super().__init__(config=config or DiffusionNetConfig())
         cfg = self.config
-        self.first = nn.Linear(cfg.input_dim, cfg.width)
+        self.first = nn.Linear(HKS_SCALES if cfg.input_features == "hks" else cfg.input_dim, cfg.width)
         self.blocks = nn.ModuleList(
             DiffusionNetBlock(cfg.width, cfg.dropout, cfg.with_gradient_features, cfg.with_gradient_rotations)
             for _ in range(cfg.num_blocks)
@@ -147,7 +166,7 @@ class DiffusionNet(BaseNetwork):
         validate_mesh_inputs(inputs, "DiffusionNet")
         num_vertices = len(inputs.coordinates)
         if inputs.node_features is None:
-            if self.config.input_dim != 3:
+            if self.config.input_features == "xyz" and self.config.input_dim != 3:
                 raise ValueError(f"DiffusionNet expects node_features [V, {self.config.input_dim}] (input_dim != 3).")
         elif tuple(inputs.node_features.shape) != (num_vertices, self.config.input_dim):
             raise ValueError(f"node_features must have shape [{num_vertices}, {self.config.input_dim}], "
@@ -169,8 +188,12 @@ class DiffusionNet(BaseNetwork):
             ops = self._compute_operators(vertices, faces, offsets)
         ops = {k: v.to(device=parameter.device, dtype=parameter.dtype) for k, v in ops.items()}
 
-        x = vertices if inputs.node_features is None else torch.as_tensor(
-            inputs.node_features, device=parameter.device, dtype=parameter.dtype)
+        if inputs.node_features is not None:
+            x = torch.as_tensor(inputs.node_features, device=parameter.device, dtype=parameter.dtype)
+        elif self.config.input_features == "hks":
+            x = heat_kernel_signature(ops, offsets)
+        else:
+            x = vertices
         x = self.first(x)
         for block in self.blocks:
             x = block(x, ops, offsets)
