@@ -318,7 +318,7 @@ def main() -> None:
         def best_by(rows: list, key: str) -> dict:
             return {}
 
-    st.set_page_config(page_title="Neural3DBench Dashboard", layout="wide")
+    st.set_page_config(page_title="Neural3DBench", page_icon=":material/deployed_code:", layout="wide")
 
     @st.cache_resource
     def get_bridge() -> AdvisorBridge:
@@ -358,16 +358,66 @@ def main() -> None:
         """run_id and status are cache keys only: a run finishing invalidates the cached report."""
         return bridge.benchmark_results(tracking_uri)
 
-    st.title("Neural3DBench Dashboard")
     run_state = trainer.get_status()
     measured = cached_results(TrainingConfig().tracking_uri, run_state["run_id"], run_state["status"])
-    st.caption(f"{len(model_names)} registered models · {len(TASKS)} supported tasks · {len(DATASETS)} datasets · "
-               f"{len(measured['runs'])} finished runs · advisor: {bridge.source}")
+
+    # ------------------------------------------------------------ header
+    st.title(":material/deployed_code: Neural3DBench")
+    st.markdown("Pick, check and train 3D deep learning models: **advisor → data → training → inspection → results**.")
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Registered models", len({ModelRegistry.get(n) for n in model_names}), border=True, icon=":material/hub:",
+              help="Aliases such as pointnet++ are counted once.")
+    k2.metric("Supported tasks", len(TASKS), border=True, icon=":material/task_alt:",
+              help="Not covered yet: " + ", ".join(t.replace("_", " ") for t in UNCOVERED_TASKS) + ".")
+    k3.metric("Datasets", len(DATASETS), border=True, icon=":material/database:")
+    k4.metric("Finished runs", len(measured["runs"]), border=True, icon=":material/monitoring:")
     if bridge.source != "advisor":
         st.warning(f"Advisor unavailable, using the registry fallback: {bridge.error}")
-    advisor_tab, preview_tab, train_tab, inspect_tab, results_tab = st.tabs(
-        ["1 · Problem & Advisor", "2 · Data", "3 · Training", "4 · Inspection", "5 · Results"]
-    )
+
+    # ------------------------------------------------------------ sidebar
+    with st.sidebar:
+        st.subheader(":material/dns: System")
+        if torch.cuda.is_available():
+            st.badge(f"GPU · {torch.cuda.get_device_name(0)}", icon=":material/memory:", color="green")
+        else:
+            st.badge("CPU only", icon=":material/memory:", color="orange")
+        st.badge("Advisor online" if bridge.source == "advisor" else "Advisor: registry fallback",
+                 icon=":material/psychology:",
+                 color="green" if bridge.source == "advisor" else "orange")
+
+        @st.fragment(run_every=POLL_SECONDS if run_state["status"] == "training" else None)
+        def sidebar_run() -> None:
+            current, config = trainer.get_status(), trainer.config
+            st.subheader(":material/model_training: Current run")
+            if config is None:
+                st.caption("No run yet.")
+                return
+            colors = {"training": "blue", "completed": "green", "failed": "red", "idle": "gray"}
+            st.badge(current["status"], color=colors.get(current["status"], "gray"))
+            st.markdown(f"**{config.model_name}** on `{config.dataset}`")
+            st.progress(current["current_epoch"] / max(current["total_epochs"], 1),
+                        text=f"epoch {current['current_epoch']} / {current['total_epochs']}")
+            if current["val_loss"] is not None:
+                st.caption(f"val loss {current['val_loss']:.4g}")
+
+        sidebar_run()
+        if measured["best_per_dataset"]:
+            st.subheader(":material/emoji_events: Best so far")
+            for row in measured["best_per_dataset"]:
+                st.markdown(f"**{row['model']}** · {row['primary_metric'].removeprefix('val_')} {row['score']:.3g}  \n"
+                            f":gray[{row['dataset']}]")
+        st.divider()
+        st.link_button("MLflow UI", MLFLOW_UI_URL, icon=":material/open_in_new:", width="stretch")
+        st.link_button("Add a network", "https://github.com/n94kholdi/neural3dbench/blob/main/docs/adding_a_network.md",
+                       icon=":material/add_circle:", width="stretch")
+
+    advisor_tab, preview_tab, train_tab, inspect_tab, results_tab = st.tabs([
+        ":material/psychology: Problem & Advisor",
+        ":material/view_in_ar: Data",
+        ":material/model_training: Training",
+        ":material/troubleshoot: Inspection",
+        ":material/leaderboard: Results",
+    ])
 
     # ------------------------------------------------------------ 1. advisor
     with advisor_tab:
@@ -393,7 +443,7 @@ def main() -> None:
                     "dataset_size": p2.number_input("Training samples", min_value=1, value=1000, step=100),
                     "epochs": p3.number_input("Epochs", min_value=1, value=100, step=10),
                 }
-            submitted = st.form_submit_button("Get recommendations", type="primary")
+            submitted = st.form_submit_button("Get recommendations", type="primary", icon=":material/auto_awesome:")
         if submitted:
             try:
                 st.session_state["recommendations"] = bridge.get_recommendations(
@@ -410,14 +460,17 @@ def main() -> None:
         if result:
             verdict = result.get("verdict", "fit")
             if verdict == "no_fit":
-                st.error(f"**Not supported yet.** {result['reason']}")
+                st.error(f"**Not supported yet.** {result['reason']}", icon=":material/block:")
                 for net in result.get("suggested_networks", []):
                     st.markdown(f"- **{net['name']}**: {net['why']} [paper]({net['reference']})")
                 if result.get("suggested_networks"):
                     st.caption("Add one of these as a new architecture (see `docs/adding_a_network.md`); "
                                "the advisor picks it up from the registry and catalog.yaml.")
             elif verdict == "weak_fit":
-                st.warning(result["reason"])
+                st.warning(result["reason"], icon=":material/report:")
+            else:
+                st.success(f"**{len(result['recommendations'])} models fit this problem**, ranked by the advisor.",
+                           icon=":material/check_circle:")
             st.caption(f"{result.get('note', '')} Considered {result.get('considered', 0)} models; source: {result['source']}.")
             if not result["recommendations"]:
                 st.info("No registered model matches this representation.")
@@ -429,52 +482,49 @@ def main() -> None:
                     check = bridge.preflight(row["model"], problem_text, problem_nodes, problem_assumptions)
                 except (ValueError, KeyError) as exc:
                     check = {"failed": str(exc)}
+                budget = (check or {}).get("budget")
+                run = best_measured.get(row["model"])
+                peak = row.get("estimated_training_peak_gb")
                 with container, st.container(border=True):
-                    head, score, memory, fits, hours = st.columns([3, 1, 1, 1, 1])
-                    head.subheader(f"#{rank} {row.get('display_name', row['model'])}")
-                    score.metric("Score", row.get("score"))
-                    peak = row.get("estimated_training_peak_gb")
-                    memory.metric("Train peak", "n/a" if peak is None else f"{peak:.2f} GB")
-                    fits.metric("Fits VRAM", {True: "yes", False: "no", None: "n/a"}[row.get("fits_vram")])
-                    budget = (check or {}).get("budget")
+                    st.markdown(f"#### #{rank} · {row.get('display_name', row['model'])}")
+                    with st.container(horizontal=True, gap="small"):
+                        fits = row.get("fits_vram")
+                        if fits is True:
+                            st.badge(f"fits {result['vram_gb']:g} GB", icon=":material/check:", color="green")
+                        elif fits is False:
+                            st.badge(f"needs ~{peak:.1f} GB", icon=":material/warning:", color="red")
+                        if check and "failed" not in check:
+                            if check["errors"]:
+                                st.badge(f"pre-flight: {check['errors']} error(s)", icon=":material/error:", color="red")
+                            elif check["warnings"]:
+                                st.badge(f"pre-flight: {check['warnings']} warning(s)", icon=":material/warning:",
+                                         color="orange")
+                            else:
+                                st.badge("pre-flight passed", icon=":material/verified:", color="green")
+                        if run:
+                            st.badge(f"measured {run['primary_metric'].removeprefix('val_')} {run['score']:.3g} "
+                                     f"on {run['dataset']}", icon=":material/monitoring:", color="blue")
+                        if row.get("complexity"):
+                            st.badge(row["complexity"].replace("*", "×"), icon=":material/functions:", color="gray")
+
+                    score, memory, hours = st.columns(3)
+                    score.metric("Advisor score", row.get("score"))
+                    memory.metric("Training peak", "n/a" if peak is None else f"{peak:.2f} GB")
                     hours.metric(f"Train time ({budget['gpu']})" if budget else "Train time",
-                                 f"~{budget['total_hours']:.1f} h" if budget else "n/a",
+                                 (f"~{budget['total_hours']:.1f} h" if budget["total_hours"] >= 1
+                                  else f"~{max(1, round(budget['total_hours'] * 60))} min") if budget else "n/a",
                                  help=None if not budget else
                                  f"Plausible range {budget['plausible_range_hours'][0]}–{budget['plausible_range_hours'][1]} h. "
                                  + budget["assumptions"])
-                    for line in row.get("rationale", []):
-                        st.markdown(f"- {line}")
-                    for line in row.get("pitfalls", []):
-                        st.markdown(f"- :orange[{line}]")
-                    if row.get("complexity"):
-                        st.caption(f"Complexity: `{row['complexity']}`")
-                    run = best_measured.get(row["model"])
-                    if run:
-                        st.caption(f"Measured: best {run['primary_metric']} = {run['score']:.4g} on `{run['dataset']}` "
-                                   f"({run['epochs']} epochs). See tab 5.")
+
+                    why, risks = st.columns(2)
+                    if row.get("rationale"):
+                        why.markdown("**Why it fits**\n" + "\n".join(f"- {line}" for line in row["rationale"]))
+                    if row.get("pitfalls"):
+                        risks.markdown("**Watch out**\n" + "\n".join(f"- :orange[{line}]" for line in row["pitfalls"]))
+
                     left, middle, right = st.columns(3)
-                    if check and "failed" not in check:
-                        label = (f":red[Pre-flight: {check['errors']} error(s)]" if check["errors"]
-                                 else f":orange[Pre-flight: {check['warnings']} warning(s)]" if check["warnings"]
-                                 else ":green[Pre-flight: passed]")
-                        with middle.popover(label, width="stretch"):
-                            icons = {"error": "🔴", "warning": "🟠", "info": "🔵", "ok": "🟢"}
-                            if not check["findings"]:
-                                st.markdown("🟢 No assumption issues for the selected physics and data.")
-                            for finding in check["findings"]:
-                                st.markdown(f"{icons.get(finding['severity'], '')} **{finding['check']}**: {finding['message']}")
-                            if check["symmetry"]:
-                                st.markdown("**Symmetries**")
-                                for v in check["symmetry"]["verdicts"]:
-                                    mark = "🟢" if v["guaranteed_by_architecture"] else "🟠"
-                                    st.markdown(f"{mark} **{v['symmetry']}**: {v['action']}")
-                                for warning in check["symmetry"]["warnings"]:
-                                    st.caption(warning)
-                            for warning in check["budget"]["warnings"]:
-                                st.caption(f"⚠ {warning}")
-                    elif check:
-                        middle.caption(f"Pre-flight unavailable: {check['failed']}")
-                    with left.popover("Model dossier", width="stretch"):
+                    with left.popover("Model dossier", icon=":material/menu_book:", width="stretch"):
                         try:
                             dossier = bridge.get_dossier(row["model"])
                         except KeyError as exc:
@@ -488,7 +538,32 @@ def main() -> None:
                                     st.markdown("\n".join(f"- {item}" for item in dossier[title]))
                             st.markdown("**Full dossier**")
                             st.json(dossier, expanded=False)
+                    if check and "failed" not in check:
+                        with middle.popover("Pre-flight details", icon=":material/fact_check:", width="stretch"):
+                            icons = {"error": ":material/error:", "warning": ":material/warning:",
+                                     "info": ":material/info:", "ok": ":material/check_circle:"}
+                            colors = {"error": "red", "warning": "orange", "info": "blue", "ok": "green"}
+                            if not check["findings"]:
+                                st.markdown(":green[:material/check_circle:] No assumption issues for the selected "
+                                            "physics and data.")
+                            for finding in check["findings"]:
+                                color = colors.get(finding["severity"], "gray")
+                                st.markdown(f":{color}[{icons.get(finding['severity'], '')}] "
+                                            f"**{finding['check']}**: {finding['message']}")
+                            if check["symmetry"]:
+                                st.markdown("**Symmetries**")
+                                for v in check["symmetry"]["verdicts"]:
+                                    mark = (":green[:material/check_circle:]" if v["guaranteed_by_architecture"]
+                                            else ":orange[:material/warning:]")
+                                    st.markdown(f"{mark} **{v['symmetry']}**: {v['action']}")
+                                for warning in check["symmetry"]["warnings"]:
+                                    st.caption(warning)
+                            for warning in check["budget"]["warnings"]:
+                                st.caption(f"⚠ {warning}")
+                    elif check:
+                        middle.caption(f"Pre-flight unavailable: {check['failed']}")
                     right.button("Use for training", key=f"use_{row['model']}", on_click=use_model, args=(row["model"],),
+                                 icon=":material/play_arrow:", type="primary" if rank == 1 else "secondary",
                                  width="stretch", disabled=verdict == "no_fit")
 
         with st.expander("Estimate VRAM", expanded=not result):
@@ -675,17 +750,17 @@ def main() -> None:
                          help='Passed to ModelRegistry.create, e.g. {"widths": [64, 64]}.')
 
         b1, b2, b3 = st.columns([1, 1, 2])
-        if b1.button("Start Training", type="primary", disabled=running, width="stretch"):
+        if b1.button("Start Training", type="primary", icon=":material/play_arrow:", disabled=running, width="stretch"):
             try:
                 trainer.start_training(config_from_form(st.session_state))
             except (ValueError, KeyError, TypeError, RuntimeError) as exc:  # bad JSON/config or a run in progress
                 st.error(f"Could not start training: {exc}")
             else:
                 st.rerun()
-        if b2.button("Stop Training", disabled=not running, width="stretch"):
+        if b2.button("Stop Training", icon=":material/stop:", disabled=not running, width="stretch"):
             trainer.stop_training(timeout=0)  # do not block the UI; the worker stops after this epoch
             st.toast("Stopping after the current epoch...")
-        b3.link_button("Open MLflow UI", MLFLOW_UI_URL, width="stretch")
+        b3.link_button("Open MLflow UI", MLFLOW_UI_URL, icon=":material/open_in_new:", width="stretch")
         st.caption(f"Start the MLflow UI with `MLFLOW_ALLOW_FILE_STORE=true mlflow ui --backend-store-uri ./mlruns` (serves {MLFLOW_UI_URL}).")
 
         @st.fragment(run_every=POLL_SECONDS if running else None)
@@ -745,7 +820,7 @@ def main() -> None:
                 st.session_state.update(form_values(config))
                 st.toast("Training form filled from the last run; edit it in Tab 3 and press Start.")
 
-            st.button("Launch New Run with Modified Params", on_click=relaunch, type="primary")
+            st.button("Launch New Run with Modified Params", on_click=relaunch, type="primary", icon=":material/replay:")
 
     # ------------------------------------------------------------ 5. results
     with results_tab:
@@ -755,9 +830,13 @@ def main() -> None:
         if not measured["runs"]:
             st.info("No finished runs yet. Train a model in Tab 3; its final validation metrics appear here.")
         else:
-            st.subheader("Leaderboard: best model per dataset")
-            st.dataframe(pd.DataFrame(measured["best_per_dataset"]), hide_index=True, width="stretch",
-                         column_config={"score": st.column_config.NumberColumn(format="%.4g")})
+            st.subheader(":material/emoji_events: Leaderboard: best model per dataset")
+            with st.container(horizontal=True, gap="medium"):
+                for row in measured["best_per_dataset"]:
+                    st.metric(row["dataset"], row["model"], help=(row["task"] or "task not logged").replace("_", " "),
+                              delta=f"{row['primary_metric'].removeprefix('val_')} {row['score']:.4g}",
+                              delta_color="off", delta_arrow="off", border=True, width=260)
+            st.divider()
 
             runs = pd.DataFrame(measured["runs"])
             pick = st.selectbox("Dataset", sorted(runs["dataset"].dropna().unique()), key="results_dataset")
@@ -785,7 +864,8 @@ def main() -> None:
                 st.line_chart(curves, y_label=metric)
 
             flat = runs.drop(columns=["metrics"]).join(pd.json_normalize(runs["metrics"].tolist()))
-            st.download_button("Download all runs (CSV)", flat.to_csv(index=False), "neural3dbench_runs.csv", "text/csv")
+            st.download_button("Download all runs (CSV)", flat.to_csv(index=False), "neural3dbench_runs.csv", "text/csv",
+                               icon=":material/download:")
 
 
 if __name__ == "__main__":

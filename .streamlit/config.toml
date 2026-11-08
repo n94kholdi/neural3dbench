@@ -1,0 +1,35 @@
+# Dashboard theme; Streamlit reads this when launched from the repository root
+# (streamlit run tools/dashboard/app.py).
+
+[theme]
+font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+codeFont = "JetBrains Mono:https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap"
+baseRadius = "0.6rem"
+buttonRadius = "0.6rem"
+showWidgetBorder = true
+showSidebarBorder = true
+metricValueFontWeight = 600
+headingFontWeights = [700, 600, 600, 600, 600, 600]
+chartCategoricalColors = ["#0d9488", "#6366f1", "#f59e0b", "#e11d48", "#0ea5e9", "#84cc16", "#a855f7", "#64748b"]
+
+[theme.light]
+primaryColor = "#0d9488"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f4f6f8"
+textColor = "#0f172a"
+borderColor = "#e2e8f0"
+linkColor = "#0f766e"
+
+[theme.light.sidebar]
+backgroundColor = "#f7f9fb"
+
+[theme.dark]
+primaryColor = "#2dd4bf"
+backgroundColor = "#0b1220"
+secondaryBackgroundColor = "#141c2e"
+textColor = "#e2e8f0"
+borderColor = "#24304a"
+linkColor = "#5eead4"
+
+[theme.dark.sidebar]
+backgroundColor = "#0f172a"
