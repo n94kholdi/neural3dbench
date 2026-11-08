@@ -118,6 +118,11 @@ def test_app_end_to_end(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
     assert any(m.label == "Final val_loss" for m in app.metric), ([e.value for e in app.error], [c.value for c in app.code])
     assert not app.error, [e.value for e in app.error]  # field comparison rendered from the checkpoint
 
+    # Tab 1 cards carry a time estimate; Tab 5 ranks the finished run.
+    assert any(m.label.startswith("Train time") and m.value.startswith("~") for m in app.metric)
+    assert any(s.value.startswith("Leaderboard") for s in app.subheader)
+    assert "1 finished runs" in app.caption[0].value
+
     # Tab 4: relaunch copies the finished run's settings back into the form.
     app.number_input(key="train_epochs").set_value(7)
     next(b for b in app.button if b.label.startswith("Launch New Run")).click().run()

@@ -309,6 +309,15 @@ def main() -> None:
     from tools.dashboard.trainer import Trainer, TrainingConfig
     from tools.dashboard.visualizer import class_color, plot_labelled_points, plot_mesh, plot_point_cloud
 
+    try:  # tools.mcp_advisor needs pyyaml
+        from tools.mcp_advisor.guardrails import BOUNDARY_CONDITIONS, GPUS, SYMMETRIES, TARGET_KINDS
+        from tools.mcp_advisor.results import best_by
+    except ImportError:  # registry fallback: no pre-flight checks or measured results
+        BOUNDARY_CONDITIONS, GPUS, SYMMETRIES, TARGET_KINDS = ("none",), {"RTX4090": None}, (), ("scalar",)
+
+        def best_by(rows: list, key: str) -> dict:
+            return {}
+
     st.set_page_config(page_title="Neural3DBench Dashboard", layout="wide")
 
     @st.cache_resource
@@ -344,11 +353,20 @@ def main() -> None:
             st.session_state["train_dataset"] = dataset
         st.toast(f"{name} selected in the Training tab" + (f" with the {dataset} dataset." if dataset else "."))
 
+    @st.cache_data(ttl=10, show_spinner=False)
+    def cached_results(tracking_uri: str, run_id: str | None, status: str) -> dict[str, Any]:
+        """run_id and status are cache keys only: a run finishing invalidates the cached report."""
+        return bridge.benchmark_results(tracking_uri)
+
     st.title("Neural3DBench Dashboard")
+    run_state = trainer.get_status()
+    measured = cached_results(TrainingConfig().tracking_uri, run_state["run_id"], run_state["status"])
+    st.caption(f"{len(model_names)} registered models · {len(TASKS)} supported tasks · {len(DATASETS)} datasets · "
+               f"{len(measured['runs'])} finished runs · advisor: {bridge.source}")
     if bridge.source != "advisor":
         st.warning(f"Advisor unavailable, using the registry fallback: {bridge.error}")
-    advisor_tab, preview_tab, train_tab, inspect_tab = st.tabs(
-        ["1 · Problem & Advisor", "2 · Data", "3 · Training", "4 · Inspection"]
+    advisor_tab, preview_tab, train_tab, inspect_tab, results_tab = st.tabs(
+        ["1 · Problem & Advisor", "2 · Data", "3 · Training", "4 · Inspection", "5 · Results"]
     )
 
     # ------------------------------------------------------------ 1. advisor
@@ -361,6 +379,20 @@ def main() -> None:
             vram_gb = c4.number_input("Target GPU memory (GB)", min_value=0.5, value=8.0, step=1.0)
             description = st.text_input("Problem description (optional)", placeholder="e.g. CFD pressure on car surfaces")
             target_metric = st.radio("Optimize for", ("accuracy", "speed"), horizontal=True)
+            with st.expander("Physics & data assumptions (pre-flight checks)"):
+                p1, p2, p3 = st.columns(3)
+                assumptions = {
+                    "boundary_conditions": p1.selectbox("Boundary conditions", BOUNDARY_CONDITIONS),
+                    "target_kind": p2.selectbox("Target kind", TARGET_KINDS,
+                                                help="Vector/tensor targets need rotation equivariance, not invariance."),
+                    "required_symmetries": p3.multiselect("Required symmetries", SYMMETRIES, default=["permutation"]),
+                    "topology_changes": p1.checkbox("Topology changes between samples"),
+                    "geometry_varies": p2.checkbox("Geometry varies between samples"),
+                    "evaluate_at_unseen_resolution": p3.checkbox("Evaluate at an unseen resolution"),
+                    "target_gpu": p1.selectbox("GPU for the time estimate", list(GPUS), index=list(GPUS).index("RTX4090")),
+                    "dataset_size": p2.number_input("Training samples", min_value=1, value=1000, step=100),
+                    "epochs": p3.number_input("Epochs", min_value=1, value=100, step=10),
+                }
             submitted = st.form_submit_button("Get recommendations", type="primary")
         if submitted:
             try:
@@ -372,6 +404,7 @@ def main() -> None:
             else:
                 no_fit = st.session_state["recommendations"].get("verdict") == "no_fit"
                 st.session_state["problem_dataset"] = None if no_fit else dataset_for_problem(task, description)
+                st.session_state["problem_context"] = (f"{task} {description}", int(num_nodes), assumptions)
 
         result = st.session_state.get("recommendations")
         if result:
@@ -389,21 +422,58 @@ def main() -> None:
             if not result["recommendations"]:
                 st.info("No registered model matches this representation.")
             container = st.expander("Closest registered models (not a fit for this task)") if verdict == "no_fit" else st.container()
+            problem_text, problem_nodes, problem_assumptions = st.session_state.get("problem_context", ("", 10_000, {}))
+            best_measured = best_by(measured["runs"], "model")
             for rank, row in enumerate(result["recommendations"], 1):
+                try:
+                    check = bridge.preflight(row["model"], problem_text, problem_nodes, problem_assumptions)
+                except (ValueError, KeyError) as exc:
+                    check = {"failed": str(exc)}
                 with container, st.container(border=True):
-                    head, score, memory, fits = st.columns([3, 1, 1, 1])
+                    head, score, memory, fits, hours = st.columns([3, 1, 1, 1, 1])
                     head.subheader(f"#{rank} {row.get('display_name', row['model'])}")
                     score.metric("Score", row.get("score"))
                     peak = row.get("estimated_training_peak_gb")
                     memory.metric("Train peak", "n/a" if peak is None else f"{peak:.2f} GB")
                     fits.metric("Fits VRAM", {True: "yes", False: "no", None: "n/a"}[row.get("fits_vram")])
+                    budget = (check or {}).get("budget")
+                    hours.metric(f"Train time ({budget['gpu']})" if budget else "Train time",
+                                 f"~{budget['total_hours']:.1f} h" if budget else "n/a",
+                                 help=None if not budget else
+                                 f"Plausible range {budget['plausible_range_hours'][0]}–{budget['plausible_range_hours'][1]} h. "
+                                 + budget["assumptions"])
                     for line in row.get("rationale", []):
                         st.markdown(f"- {line}")
                     for line in row.get("pitfalls", []):
                         st.markdown(f"- :orange[{line}]")
                     if row.get("complexity"):
                         st.caption(f"Complexity: `{row['complexity']}`")
-                    left, right = st.columns(2)
+                    run = best_measured.get(row["model"])
+                    if run:
+                        st.caption(f"Measured: best {run['primary_metric']} = {run['score']:.4g} on `{run['dataset']}` "
+                                   f"({run['epochs']} epochs). See tab 5.")
+                    left, middle, right = st.columns(3)
+                    if check and "failed" not in check:
+                        label = (f":red[Pre-flight: {check['errors']} error(s)]" if check["errors"]
+                                 else f":orange[Pre-flight: {check['warnings']} warning(s)]" if check["warnings"]
+                                 else ":green[Pre-flight: passed]")
+                        with middle.popover(label, width="stretch"):
+                            icons = {"error": "🔴", "warning": "🟠", "info": "🔵", "ok": "🟢"}
+                            if not check["findings"]:
+                                st.markdown("🟢 No assumption issues for the selected physics and data.")
+                            for finding in check["findings"]:
+                                st.markdown(f"{icons.get(finding['severity'], '')} **{finding['check']}**: {finding['message']}")
+                            if check["symmetry"]:
+                                st.markdown("**Symmetries**")
+                                for v in check["symmetry"]["verdicts"]:
+                                    mark = "🟢" if v["guaranteed_by_architecture"] else "🟠"
+                                    st.markdown(f"{mark} **{v['symmetry']}**: {v['action']}")
+                                for warning in check["symmetry"]["warnings"]:
+                                    st.caption(warning)
+                            for warning in check["budget"]["warnings"]:
+                                st.caption(f"⚠ {warning}")
+                    elif check:
+                        middle.caption(f"Pre-flight unavailable: {check['failed']}")
                     with left.popover("Model dossier", width="stretch"):
                         try:
                             dossier = bridge.get_dossier(row["model"])
@@ -600,6 +670,7 @@ def main() -> None:
         gpu_problem = cuda_problem()
         if gpu_problem:
             st.warning(gpu_problem)
+        with st.expander("Model config overrides (JSON)"):
             st.text_area("Model config overrides (JSON)", key="train_model_config", disabled=running,
                          help='Passed to ModelRegistry.create, e.g. {"widths": [64, 64]}.')
 
@@ -675,6 +746,46 @@ def main() -> None:
                 st.toast("Training form filled from the last run; edit it in Tab 3 and press Start.")
 
             st.button("Launch New Run with Modified Params", on_click=relaunch, type="primary")
+
+    # ------------------------------------------------------------ 5. results
+    with results_tab:
+        import pandas as pd
+
+        st.caption(measured["note"])
+        if not measured["runs"]:
+            st.info("No finished runs yet. Train a model in Tab 3; its final validation metrics appear here.")
+        else:
+            st.subheader("Leaderboard: best model per dataset")
+            st.dataframe(pd.DataFrame(measured["best_per_dataset"]), hide_index=True, width="stretch",
+                         column_config={"score": st.column_config.NumberColumn(format="%.4g")})
+
+            runs = pd.DataFrame(measured["runs"])
+            pick = st.selectbox("Dataset", sorted(runs["dataset"].dropna().unique()), key="results_dataset")
+            subset = runs[runs["dataset"] == pick]
+            metric, higher = subset["primary_metric"].iloc[0], bool(subset["higher_is_better"].iloc[0])
+            per_model = subset.groupby("model")["score"].agg("max" if higher else "min").sort_values(ascending=not higher)
+            st.markdown(f"**Best {metric} per model on `{pick}`** ({'higher' if higher else 'lower'} is better)")
+            st.bar_chart(per_model, horizontal=True)
+
+            columns = ["model", "score", "epochs", "num_parameters", "duration_s", "device", "stopped_early",
+                       "experiment", "run_id"]
+            st.markdown(f"**All finished runs on `{pick}`**")
+            st.dataframe(subset[columns].rename(columns={"score": metric}), hide_index=True, width="stretch")
+
+            chosen_runs = st.multiselect("Compare learning curves", subset["run_id"].tolist(),
+                                         default=subset["run_id"].tolist()[:3],
+                                         format_func=lambda r: f"{subset.set_index('run_id').at[r, 'model']} · {r[:8]}")
+            if chosen_runs:
+                client = mlflow_client(TrainingConfig().tracking_uri)
+                curves = pd.DataFrame({
+                    f"{subset.set_index('run_id').at[r, 'model']} · {r[:8]}":
+                        {m.step: m.value for m in client.get_metric_history(r, metric)}
+                    for r in chosen_runs
+                }).rename_axis("epoch").sort_index()
+                st.line_chart(curves, y_label=metric)
+
+            flat = runs.drop(columns=["metrics"]).join(pd.json_normalize(runs["metrics"].tolist()))
+            st.download_button("Download all runs (CSV)", flat.to_csv(index=False), "neural3dbench_runs.csv", "text/csv")
 
 
 if __name__ == "__main__":

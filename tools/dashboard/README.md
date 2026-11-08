@@ -31,6 +31,11 @@ MLflow 3 defaults `mlflow ui` to a SQLite store and rejects the file store unles
    When no registered model can do the task (instance segmentation,
    generation, scene flow), the advisor returns `verdict: "no_fit"`. The tab then shows
    *Not supported yet*, what the task needs and networks to add (with papers), and disables *Use for training*. *Estimate VRAM* gives the memory heuristic for any model.
+   *Physics & data assumptions* (boundary conditions, target kind, required symmetries, topology/geometry
+   changes, unseen resolution, GPU, dataset size, epochs) feed a **pre-flight check** on every card: the
+   advisor's `audit_problem_assumptions`, `check_symmetry_and_invariance` and `estimate_training_budget`,
+   shown as a passed / warnings / errors badge and an estimated training time. Cards also show the best
+   measured result of the model from tab 5.
 2. **Data**
    - *Preview geometry*: upload `.obj`, ASCII `.ply` (a per-point `label` property colors by class) or `.pt`
      (a `[N, 3]` tensor or a dict with `vertices`/`coords`, optional `faces` and `field`/`target`), or load a repository sample.
@@ -59,6 +64,11 @@ MLflow 3 defaults `mlflow ui` to a SQLite store and rejects the file store unles
 4. **Inspection**: the task's preview on validation samples (field: truth, prediction and |error|;
    parts: true parts, predicted parts and misclassified points; classes: true vs predicted label), final
    MLflow metrics, and *Launch New Run with Modified Params*, which copies the run's settings back into tab 3.
+5. **Results**: every finished MLflow run in `./mlruns`. A leaderboard of the best model per dataset, ranked by
+   the task's primary metric (mIoU for part segmentation, accuracy for classification, MAE for field
+   regression, Chamfer for completion), a per-model bar chart and run table for one dataset, overlaid
+   learning curves, and a CSV export. The same report is the `get_benchmark_results` MCP tool
+   (`tools/mcp_advisor/results.py`). Synthetic datasets are smoke tests, not published benchmarks.
 
 One trainer is shared by every browser session of a server process, so only one run trains at a time.
 

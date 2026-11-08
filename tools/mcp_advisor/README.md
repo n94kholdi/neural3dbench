@@ -58,6 +58,7 @@ python /abs/path/to/Neural3DBench/tools/mcp_advisor/server.py   # from anywhere
 | `estimate_training_budget` | `model_name`, `num_elements`, `dataset_size`, `epochs`, `target_gpu="A100"`, `precision="fp32"` | Wall-clock hours with a 0.5x-4x range (H100, A100, RTX4090, V100, T4) |
 | `generate_benchmark_config` | `model_name`, `dataset_name`, `num_elements`, `hardware_target="A100"`, `dataset_size=1000`, `epochs=100` | YAML config and a `ModelRegistry.create()` launcher with batch, precision and optimizer filled in |
 | `suggest_ablation_matrix` | `primary_model`, `max_contenders=4` | Baselines with the role each plays (simpler model, other interaction mechanism, other representation) |
+| `get_benchmark_results` | `model_name=None`, `dataset=None`, `tracking_uri="./mlruns"` | Measured final validation metrics of dashboard training runs (MLflow) and the best model per dataset by the task's primary metric |
 
 The guardrail tools read four extra catalog fields: `symmetries`, `receptive_field`,
 `resolution_transfer` and the optional `boundary_conditions`. Training time treats a

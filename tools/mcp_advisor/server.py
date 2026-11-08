@@ -17,7 +17,7 @@ try:
 except ImportError:
     from mcp.server.fastmcp import FastMCP as _Server  # mcp 1.x
 
-from tools.mcp_advisor import guardrails
+from tools.mcp_advisor import guardrails, results
 from tools.mcp_advisor.advisor import Advisor
 
 advisor = Advisor()
@@ -31,7 +31,8 @@ server = _Server(
         "Instance segmentation, generation and scene flow are not covered: recommend_architecture then returns "
         "verdict no_fit with networks to add; say so instead of proposing a model. "
         "Memory and time figures are heuristics. "
-        "Before training, run audit_problem_assumptions and check_symmetry_and_invariance."
+        "Before training, run audit_problem_assumptions and check_symmetry_and_invariance. "
+        "get_benchmark_results returns measured metrics of past training runs; cite them when available."
     ),
 )
 
@@ -201,6 +202,19 @@ def generate_benchmark_config(
 def suggest_ablation_matrix(primary_model: str, max_contenders: int = 4) -> dict:
     """Baseline contenders that isolate the primary model's architectural contribution."""
     return guardrails.suggest_ablation_matrix(advisor, primary_model, max_contenders)
+
+
+@server.tool()
+def get_benchmark_results(
+    model_name: str | None = None, dataset: str | None = None, tracking_uri: str = "./mlruns"
+) -> dict:
+    """Measured results of dashboard training runs (MLflow): final validation metrics per run and the
+    best model per dataset by its task's primary metric (mIoU, accuracy, MAE or Chamfer).
+
+    Prefer these numbers over heuristics when the user asks which model works best on a dataset.
+    tracking_uri: MLflow store; a relative path resolves from the server's working directory.
+    """
+    return results.benchmark_results(tracking_uri, model_name, dataset)
 
 
 @server.tool()

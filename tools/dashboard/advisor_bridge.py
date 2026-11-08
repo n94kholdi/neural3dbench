@@ -99,6 +99,55 @@ class AdvisorBridge:
             return {**self.advisor.estimate_resource_footprint(model_name, num_nodes, batch_size, precision), "source": self.source}
         return self._fallback_memory(model_name, num_nodes, batch_size, precision)
 
+    def preflight(
+        self,
+        model_name: str,
+        problem_description: str,
+        num_nodes: int,
+        assumptions: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        """Guardrail report for one model: assumption audit, symmetry verdicts and training time.
+
+        assumptions keys (all optional): boundary_conditions, topology_changes, geometry_varies,
+        evaluate_at_unseen_resolution, required_symmetries, target_kind, target_gpu, dataset_size, epochs.
+        Returns ``None`` on the registry fallback, which has no catalog metadata to check against.
+        """
+        if self.advisor is None:
+            return None
+        from tools.mcp_advisor import guardrails
+
+        a = assumptions or {}
+        audit = guardrails.audit_problem_assumptions(
+            self.advisor, problem_description, model_name, a.get("boundary_conditions", "none"),
+            a.get("topology_changes", False), a.get("geometry_varies", False),
+            a.get("evaluate_at_unseen_resolution", False),
+        )
+        findings = next(iter(audit["audits"].values()), [])
+        symmetries = a.get("required_symmetries") or []
+        symmetry = guardrails.check_symmetry_and_invariance(
+            self.advisor, model_name, symmetries, a.get("target_kind", "scalar")
+        ) if symmetries else None
+        budget = guardrails.estimate_training_budget(
+            self.advisor, model_name, num_nodes, int(a.get("dataset_size", 1000)), int(a.get("epochs", 100)),
+            a.get("target_gpu", "RTX4090"),
+        )
+        broken = [] if symmetry is None else [v for v in symmetry["verdicts"] if not v["guaranteed_by_architecture"]]
+        return {
+            "findings": findings,
+            "errors": sum(f["severity"] == "error" for f in findings),
+            "warnings": sum(f["severity"] == "warning" for f in findings) + len(broken),
+            "symmetry": symmetry,
+            "budget": budget,
+        }
+
+    def benchmark_results(self, tracking_uri: str = "./mlruns", **filters: Any) -> dict[str, Any]:
+        """Measured MLflow results, same as the ``get_benchmark_results`` MCP tool."""
+        try:
+            from tools.mcp_advisor.results import benchmark_results
+        except ImportError as exc:  # tools.mcp_advisor needs pyyaml
+            return {"runs": [], "best_per_dataset": [], "note": f"Results unavailable: {exc}"}
+        return benchmark_results(tracking_uri, **filters)
+
     # ------------------------------------------------------------- fallback
 
     @staticmethod
