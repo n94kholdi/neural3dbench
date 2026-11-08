@@ -68,6 +68,25 @@ Requirements:
 
 This representation may also serve PointNet++, Transolver, GINO, and SIREN, subject to their feature requirements.
 
+## 2b. MeshNet / DiffusionNet / MeshWalker — triangle mesh
+
+Built with `models.collate_meshes([(vertices, faces), ...])`.
+
+```text
+representation = "MESH"
+
+coordinates         float32 [V, 3]  required (vertices of all meshes, concatenated)
+faces               int64   [F, 3]  required (triangles, indices into coordinates)
+batch               int64   [V]     optional for one mesh (sorted mesh id per vertex)
+node_features       float32 [V, C]  optional (DiffusionNet input channels)
+metadata["diffusion_operators"]     optional (DiffusionNet, see docs/diffusionnet.md)
+```
+
+Requirements:
+
+- Faces may form a non-manifold triangle soup; degenerate triangles should be removed.
+- Every face belongs to one mesh; `batch` must be sorted without gaps.
+
 ## 3. FNO3D — structured voxel grid
 
 File: `voxel_grid.npz`

@@ -225,6 +225,86 @@ def import_modelnet(
     )
 
 
+def clean_mesh(vertices: np.ndarray, triangles: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Drop degenerate and duplicate triangles and unreferenced vertices."""
+    triangles = triangles[(triangles[:, 0] != triangles[:, 1]) & (triangles[:, 1] != triangles[:, 2])
+                          & (triangles[:, 0] != triangles[:, 2])]
+    _, first = np.unique(np.sort(triangles, axis=1), axis=0, return_index=True)
+    triangles = triangles[np.sort(first)]
+    used, triangles = np.unique(triangles, return_inverse=True)
+    return vertices[used], triangles.reshape(-1, 3)
+
+
+def simplify_mesh(vertices: np.ndarray, triangles: np.ndarray, max_faces: int) -> tuple[np.ndarray, np.ndarray]:
+    """Clean the mesh and, above ``max_faces``, decimate it by vertex clustering on the finest grid that fits.
+
+    Vertex clustering merges all vertices in a grid cell into their mean. It is fast and needs no
+    extra dependency but does not preserve manifoldness (fine for MeshNet, DiffusionNet, MeshWalker).
+    """
+    vertices, triangles = clean_mesh(vertices, triangles)
+    resolution = 256.0
+    while len(triangles) > max_faces:
+        cell = np.floor((vertices - vertices.min(0)) / (np.ptp(vertices, axis=0).max() / resolution + 1e-12))
+        _, cluster, size = np.unique(cell, axis=0, return_inverse=True, return_counts=True)
+        cluster = cluster.reshape(-1)
+        merged = np.zeros((len(size), 3))
+        np.add.at(merged, cluster, vertices)
+        candidate = clean_mesh(merged / size[:, None], cluster[triangles])
+        if len(candidate[1]) <= max_faces:
+            vertices, triangles = candidate
+            break
+        resolution *= 0.8
+    if len(triangles) == 0:
+        raise ValueError("mesh has no valid triangles.")
+    return vertices, triangles
+
+
+def load_modelnet_meshes(
+    variant: int = 10, split: str = "train", max_faces: int = 2048, max_per_class: int | None = None,
+    seed: int = 0, progress: Progress | None = None,
+) -> tuple[list[tuple[np.ndarray, np.ndarray]], np.ndarray, list[str]]:
+    """ModelNet meshes of one official split as ``([(vertices [V, 3], faces [F, 3]), ...], labels [B], class_names)``.
+
+    Meshes are centered on their bounding box, scaled into the unit sphere and decimated to at most
+    ``max_faces`` triangles (``simplify_mesh``). The result is cached under ``DATA_DIR/meshes``.
+    """
+    if variant not in MODELNET or split not in ("train", "test"):
+        raise ValueError("variant must be 10 or 40 and split 'train' or 'test'.")
+    cache = tasks.DATA_DIR / "meshes" / f"modelnet{variant}_{split}_f{max_faces}_c{max_per_class or 'all'}_s{seed}.npz"
+    if not cache.is_file():
+        path = download(MODELNET[variant], progress)
+        rng = np.random.default_rng(seed)
+        with zipfile.ZipFile(path) as archive:
+            members = sorted(n for n in archive.namelist()
+                             if n.endswith(".off") and "__MACOSX" not in n and n.split("/")[-2] == split)
+            class_names = sorted({n.split("/")[-3] for n in members})
+            chosen = [m for c in class_names
+                      for m in sorted(rng.permutation([n for n in members if n.split("/")[-3] == c])[: max_per_class or None])]
+            vertices, faces, labels = [], [], []
+            for i, member in enumerate(chosen):
+                try:
+                    verts, tris = parse_off(archive.read(member).decode("ascii", errors="replace"))
+                    verts = verts - (verts.min(0) + verts.max(0)) / 2
+                    verts = verts / max(float(np.linalg.norm(verts, axis=1).max()), 1e-12)
+                    verts, tris = simplify_mesh(verts, tris, max_faces)
+                except ValueError:
+                    continue  # a few ModelNet meshes are degenerate
+                vertices.append(verts.astype(np.float32))
+                faces.append(tris.astype(np.int64))
+                labels.append(class_names.index(member.split("/")[-3]))
+                _report(progress, (i + 1) / len(chosen), f"Reading ModelNet{variant} {split}: {i + 1} / {len(chosen)} meshes")
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(
+            cache, vertices=np.concatenate(vertices), faces=np.concatenate(faces),
+            vertex_counts=np.array([len(v) for v in vertices]), face_counts=np.array([len(f) for f in faces]),
+            labels=np.array(labels), class_names=np.array(class_names, dtype=str),
+        )
+    with np.load(cache, allow_pickle=False) as data:
+        vertices = np.split(data["vertices"], np.cumsum(data["vertex_counts"])[:-1])
+        faces = np.split(data["faces"], np.cumsum(data["face_counts"])[:-1])
+        return list(zip(vertices, faces)), data["labels"], [str(n) for n in data["class_names"]]
+
+
 # ---------------------------------------------------------------- uploads
 
 _COORD_KEYS = ("coords", "coordinates", "points", "pos", "xyz", "vertices")

@@ -289,6 +289,104 @@ models:
     examples: [examples/adaptive_meshgraphnet_synthetic.py, tests/test_adaptive_meshgraphnet.py]
     keywords: [adaptive, remeshing, refinement, shock, contact, topology, rollout, transient]
 
+  meshnet:
+    display_name: MeshNet
+    paradigm: Face-based mesh CNN - per-face spatial and structural descriptors, mesh convolution over the 3 edge-adjacent faces, global max pool (Feng et al.).
+    representations: [mesh_graph]
+    tasks: [segmentation_classification]
+    element: face
+    inductive_biases:
+      - Faces are the unit; each face sees its 3 edge neighbours per mesh convolution.
+      - Face rotate convolution makes the descriptor invariant to the order of a face's corners.
+      - Face kernel correlation matches local normal patterns against learned normal kernels.
+    merits:
+      - Reads triangle soups directly; no manifoldness, watertightness or remeshing needed.
+      - Designed for and evaluated on ModelNet40 (about 91.9% accuracy in the paper).
+      - Fixed cost per face; simple batching by concatenation.
+    demerits:
+      - Shape classification only in this implementation (no per-face head).
+      - Not rotation invariant (absolute face centers and normals); train with the test-time orientation.
+      - Heavy activations - 1024-wide per-face MLPs; decimate meshes to about 1-2k faces.
+      - Receptive field before pooling is only about 3 face rings.
+    complexity:
+      time: O(F * (K + C^2))
+      memory: O(F * C)
+      notes: F = faces, K = num_kernel (64), C up to 1024 channels.
+    memory_model: {per_element: 19300, per_element_sq: 0, per_sample: 0}
+    speed: 3
+    expressivity: 3
+    dynamic_topology: true
+    symmetries: [permutation]
+    receptive_field: {kind: global, note: Two mesh convolutions reach about 3 face rings; global max pooling then sees the whole mesh.}
+    resolution_transfer: partial
+    examples: [examples/train_mesh_classifier.py]
+    keywords: [mesh, triangle, face, classification, modelnet, shape, cad, polygon soup]
+
+  diffusionnet:
+    display_name: DiffusionNet
+    paradigm: Learned spectral heat diffusion on the surface + tangent gradient features + per-vertex MLPs (Sharp et al.).
+    representations: [mesh_graph]
+    tasks: [segmentation_classification]
+    element: vertex
+    inductive_biases:
+      - Communication by heat diffusion on the surface with a learned time per channel (local to global).
+      - Gradient features give anisotropic, orientation-aware filters while staying frame independent.
+      - Intrinsic operators (Laplacian, mass) make it robust to the mesh's triangulation.
+    merits:
+      - Robust to remeshing and resolution changes; weights transfer across discretizations.
+      - Global receptive field from the first block at negligible cost (spectral diffusion).
+      - Classification (mass-weighted mean) and per-vertex segmentation; small model (~0.5M params).
+    demerits:
+      - Needs per-mesh precomputation (cotangent Laplacian eigenbasis, gradients) with SciPy on the CPU.
+      - Not rotation invariant with xyz inputs; use heat-kernel signatures as node_features for invariance.
+      - Very degenerate or non-manifold meshes give a poor cotangent Laplacian (no robust Laplacian here).
+    complexity:
+      time: O(L * (N * K * C + E * C + N * C^2))
+      memory: O(L * N * C)
+      notes: N = vertices, K = k_eig (128), C = width (128), L = num_blocks (4); eigendecomposition is precomputed.
+    memory_model: {per_element: 7400, per_element_sq: 0, per_sample: 360000}
+    speed: 4
+    expressivity: 4
+    dynamic_topology: true
+    symmetries: [permutation, translation]
+    receptive_field: {kind: global, note: Learned diffusion time can span the whole surface in one block.}
+    resolution_transfer: true
+    examples: [examples/train_mesh_classifier.py]
+    keywords: [mesh, surface, diffusion, laplacian, spectral, classification, segmentation, remeshing, robust, modelnet]
+
+  meshwalker:
+    display_name: MeshWalker
+    paradigm: Random walks along mesh edges; per-step xyz displacements read by stacked GRUs (Lahav and Tal).
+    representations: [mesh_graph]
+    tasks: [segmentation_classification]
+    element: vertex
+    inductive_biases:
+      - Shape is explored as sequences of edge steps; the RNN aggregates geometry along each walk.
+      - Relative step displacements make it translation invariant.
+      - Averaging over several random walks acts as test-time ensembling.
+    merits:
+      - Reads the raw vertex/edge structure; no manifoldness or remeshing required.
+      - Memory independent of mesh size; cost set by walk length and walk count.
+      - Reported about 92% on ModelNet40 in the paper.
+    demerits:
+      - Stochastic predictions; needs several walks at test time (num_walks_eval).
+      - Sequential GRUs are slow, especially on CPU; long walks train slowly.
+      - Not rotation invariant; the paper trains with rotation augmentation.
+      - Walk generation runs in Python on the CPU each forward pass.
+    complexity:
+      time: O(W * L * H^2)
+      memory: O(W * L * H)
+      notes: W = walks per mesh, L = walk_length (200), H = GRU width (up to 1024); independent of vertex count.
+    memory_model: {per_element: 40, per_element_sq: 0, per_sample: 10000000}  # per_element: edge and adjacency arrays only
+    speed: 1
+    expressivity: 3
+    dynamic_topology: true
+    symmetries: [translation]
+    receptive_field: {kind: global, note: Each walk visits walk_length vertices; only the visited part of the mesh is seen.}
+    resolution_transfer: partial
+    examples: [examples/train_mesh_classifier.py]
+    keywords: [mesh, random walk, rnn, gru, sequence, classification, modelnet, shape]
+
   unet3d:
     display_name: 3D U-Net
     paradigm: Convolutional encoder-decoder with skip connections on dense voxel grids.

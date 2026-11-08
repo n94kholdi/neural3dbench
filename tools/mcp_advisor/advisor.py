@@ -44,6 +44,7 @@ _REPO_REPRESENTATIONS = {
     "POINT_CLOUD": "point_cloud",
     "GRAPH": "mesh_graph",
     "MESH_GRAPH": "mesh_graph",
+    "MESH": "mesh_graph",
     "GRID": "voxel_grid",
     "VOXEL_GRID": "voxel_grid",
     "PARAMETRIC_SURFACE": "continuous_coords",

@@ -2,11 +2,15 @@ from .base import BaseNetwork
 from .configs import BaseModelConfig
 from .dcp import DCP, DCPConfig
 from .deep_nurbs import DeepNURBS, DeepNURBSConfig
+from .diffusionnet import DiffusionNet, DiffusionNetConfig
 from .dgcnn import DGCNN, DGCNNConfig
 from .foldingnet import FoldingNet, FoldingNetConfig
 from .fno import FNO3D, FNO3DConfig, SpectralConv3d
 from .gino import GINO, GINOConfig
 from .graph import GAT, GATConfig, GCN, GCNConfig, MeshGraphNet, MeshGraphNetConfig
+from .meshnet import MeshNet, MeshNetConfig
+from .meshwalker import MeshWalker, MeshWalkerConfig
+from .mesh_inputs import collate_meshes
 from .mlp import MLP, MLPConfig
 from .pcn import PCN, PCNConfig
 from .pointnet import PointNet, PointNetConfig
@@ -36,6 +40,8 @@ __all__ = [
     "DCPConfig",
     "DeepNURBS",
     "DeepNURBSConfig",
+    "DiffusionNet",
+    "DiffusionNetConfig",
     "DGCNN",
     "DGCNNConfig",
     "FoldingNet",
@@ -58,6 +64,11 @@ __all__ = [
     "ModelRegistry",
     "MeshGraphNet",
     "MeshGraphNetConfig",
+    "MeshNet",
+    "MeshNetConfig",
+    "MeshWalker",
+    "MeshWalkerConfig",
+    "collate_meshes",
     "MLP",
     "MLPConfig",
     "PCN",

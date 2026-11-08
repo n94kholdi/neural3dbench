@@ -20,6 +20,7 @@ class ModelInput:
     coordinates: Any = None
     node_features: Any = None
     edge_index: Any = None
+    faces: Any = None
     edge_features: Any = None
     point_features: Any = None
     point_mask: Any = None
@@ -42,6 +43,7 @@ class ModelInput:
             "coordinates",
             "node_features",
             "edge_index",
+            "faces",
             "edge_features",
             "point_features",
             "point_mask",
