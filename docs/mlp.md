@@ -52,3 +52,7 @@ layer never does when its input size differs. Each hidden layer applies
 
 `relu` has zero second derivatives almost everywhere, so prefer `tanh`, `silu`,
 or `gelu` for PDEs with second- or higher-order terms.
+
+## References
+
+- [Physics Informed Deep Learning (Part I): Data-driven Solutions of Nonlinear PDEs (arXiv 1711.10561)](https://arxiv.org/abs/1711.10561)

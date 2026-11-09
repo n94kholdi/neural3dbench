@@ -92,3 +92,15 @@ smooth coordinate/Fourier decoder; calculate PDE derivatives through that
 decoder with respect to the original physical coordinates. Mesh-based models
 remain preferable when explicit connectivity, oriented fluxes, or strict local
 conservation are central to the problem.
+
+## Paper results and recipe
+
+ModelNet40 90.7% (1024 points, xyz) and 91.9% (5000 points with normals); ShapeNetPart 85.1%
+mIoU; SHREC15 non-rigid classification 96.09% with intrinsic features. Training: Adam, learning
+rate 0.001; augmentation by random scaling, perturbation, rotation and random input dropout. This
+repository implements single-scale grouping (SSG) only.
+
+## References
+
+- [PointNet++: Deep Hierarchical Feature Learning on Point Sets in a Metric Space (arXiv 1706.02413)](https://arxiv.org/abs/1706.02413)
+- [Official implementation](https://github.com/charlesq34/pointnet2)

@@ -78,17 +78,24 @@ def test_samples() -> None:
 def test_advisor_task_reaches_training_tab(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
     app = AppTest.from_file(APP, default_timeout=120).run()
-    app.selectbox[0].set_value("segmentation_classification")
-    app.text_input[0].set_value("semantic part segmentation of chairs")
-    app.button(key="FormSubmitter:problem-Get recommendations").click().run()
-    top = app.session_state["recommendations"]["recommendations"][0]["model"]
+    app.selectbox[0].set_value("segmentation_classification").run()
+    app.radio(key="q_segmentation_classification_granularity").set_value("Part label per point (object parts)")
+    app.button(key="get_recommendations").click().run()
+    rows = app.session_state["recommendations"]["recommendations"]
+    assert rows[0]["supports_output"] and "meshnet" not in [r["model"] for r in rows if r["supports_output"]]
+    top = rows[0]["model"]
     app.button(key=f"use_{top}").click().run()
+    assert not app.exception, app.exception
     assert app.session_state["train_model"] == top
-    assert app.session_state["train_dataset"] == "chair_parts"
-    assert not [w.value for w in app.warning if "advisor problem" in w.value]
+    # chair_parts, or a downloaded ShapeNetPart (a paper benchmark) when the local cache has one.
+    from tools.dashboard.tasks import DATASETS
 
-    app.selectbox(key="train_dataset").set_value("poisson").run()
-    assert any("part segmentation" in w.value for w in app.warning)
+    assert DATASETS[app.session_state["train_dataset"]].task == "part_segmentation"
+    # Only datasets that give per-point labels are offered, and the setup is explained.
+    assert "poisson" not in app.selectbox(key="train_dataset").options
+    assert any(e.label.startswith("Why this training setup") for e in app.expander)
+    reasons = app.session_state["train_reasons"]["setup"]["reasons"]
+    assert any("as in" in r or "paper" in r for r in reasons)
 
 
 def test_app_end_to_end(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -97,7 +104,7 @@ def test_app_end_to_end(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
     assert not app.exception, app.exception
 
     # Tab 1: recommendations render as cards with a "Use for training" button.
-    app.button(key="FormSubmitter:problem-Get recommendations").click().run()
+    app.button(key="get_recommendations").click().run()
     assert app.session_state["recommendations"]["recommendations"]
     assert not app.exception, app.exception
 
@@ -134,10 +141,10 @@ def test_uncovered_task_shows_not_supported(tmp_path: Path, monkeypatch: pytest.
     monkeypatch.chdir(tmp_path)
     app = AppTest.from_file(APP, default_timeout=120).run()
     app.selectbox[0].set_value("instance_segmentation")
-    app.button(key="FormSubmitter:problem-Get recommendations").click().run()
+    app.button(key="get_recommendations").click().run()
     assert not app.exception, app.exception
     assert any("Not supported yet" in e.value for e in app.error)
-    assert app.session_state["problem_dataset"] is None
+    assert app.session_state["problem"] is None
     assert all(b.disabled for b in app.button if b.label == "Use for training")
 
 

@@ -31,6 +31,13 @@
 #                      mesh/grid/point resolution than training.
 #   boundary_conditions  Optional. hard_dirichlet when the ansatz satisfies Dirichlet BCs exactly;
 #                      omitted means BCs are learned from inputs or penalised in the loss.
+#   outputs            What the implemented heads predict: shape_label | point_label | point_field | point_set
+#                      | boxes | rigid_pose. recommend_architecture(required_output=...) filters on it.
+#   evidence           From the original paper: paper {title, venue, url}; reported [{dataset, metric, value,
+#                      setting}]; paper_recipe {optimizer, lr, schedule, batch_size, epochs, ...} (None = not
+#                      stated; scheduler {kind: step | multistep | cosine, ...} in paper epochs);
+#                      benchmark_datasets; implementation_notes (how this repository differs);
+#                      checked (date and source of the check).
 #   docs, examples     Optional extra paths; docs/<name>.md and examples/**/*<name>*.py are auto-discovered.
 #   registry_name      Only for catalog-only variants that reuse another registered model.
 
@@ -69,6 +76,28 @@ models:
     receptive_field: {kind: global, note: Global only through the final max-pool; no local context before it.}
     resolution_transfer: partial
     keywords: [classification, shape, segmentation, baseline, unordered]
+    outputs: [shape_label, point_label, point_field]
+    evidence:
+      paper: {title: 'PointNet: Deep Learning on Point Sets for 3D Classification and Segmentation', venue: CVPR 2017,
+        url: 'https://arxiv.org/abs/1612.00593'}
+      reported:
+      - {dataset: ModelNet40, metric: overall accuracy, value: 89.2%, setting: 1024 points}
+      - {dataset: ShapeNetPart, metric: mIoU, value: 83.7%}
+      - {dataset: S3DIS (Stanford 3D semantic parsing), metric: mIoU, value: 47.71%}
+      paper_recipe:
+        optimizer: adam
+        lr: 0.001
+        schedule: halved every 20 epochs
+        scheduler: {kind: step, every_epochs: 20, gamma: 0.5}
+        batch_size: 32
+        epochs: null
+        points: 1024
+        augmentation: [rotation about the up axis, Gaussian jitter (std 0.02)]
+        loss: softmax cross-entropy + 0.001 x feature-transform regularizer
+        dropout: keep 0.7 on the last FC layer
+      benchmark_datasets: [ModelNet40, ShapeNetPart, S3DIS]
+      implementation_notes: 'Matches the paper: T-Nets on, global_dim 1024, dropout 0.3 (= keep 0.7).'
+      checked: 2026-11-09, paper full text (ar5iv)
 
   pointnet2:
     display_name: PointNet++
@@ -101,6 +130,27 @@ models:
     receptive_field: {kind: global, note: Local detail limited to ball radii; global context via the pooled global feature.}
     resolution_transfer: partial
     keywords: [segmentation, local, hierarchical, part, classification]
+    outputs: [shape_label, point_label, point_field]
+    evidence:
+      paper: {title: 'PointNet++: Deep Hierarchical Feature Learning on Point Sets in a Metric Space', venue: NeurIPS
+          2017, url: 'https://arxiv.org/abs/1706.02413'}
+      reported:
+      - {dataset: ModelNet40, metric: overall accuracy, value: 90.7%, setting: '1024 points, xyz'}
+      - {dataset: ModelNet40, metric: overall accuracy, value: 91.9%, setting: 5000 points with normals}
+      - {dataset: ShapeNetPart, metric: mIoU, value: 85.1%}
+      - {dataset: SHREC15 (non-rigid), metric: accuracy, value: 96.09%, setting: intrinsic features}
+      paper_recipe:
+        optimizer: adam
+        lr: 0.001
+        schedule: null
+        batch_size: null
+        epochs: null
+        points: 1024
+        augmentation: [random scaling, point perturbation, random rotation, random input dropout (up to 0.95)]
+        loss: cross-entropy
+      benchmark_datasets: [ModelNet40, ShapeNetPart, ScanNet, SHREC15]
+      implementation_notes: Single-scale grouping (SSG) with two set-abstraction levels; no multi-scale grouping (MSG).
+      checked: 2026-11-09, paper full text (ar5iv)
 
   pointnext:
     display_name: PointNeXt
@@ -132,6 +182,31 @@ models:
     receptive_field: {kind: global, note: Local detail limited to the scaled ball radii; global context via pooling.}
     resolution_transfer: partial
     keywords: [classification, segmentation, residual, state-of-the-art]
+    outputs: [shape_label, point_label, point_field]
+    evidence:
+      paper: {title: 'PointNeXt: Revisiting PointNet++ with Improved Training and Scaling Strategies', venue: NeurIPS
+          2022, url: 'https://arxiv.org/abs/2206.04670'}
+      reported:
+      - {dataset: ScanObjectNN (PB_T50_RS), metric: overall accuracy, value: 87.7%}
+      - {dataset: ModelNet40, metric: overall accuracy, value: 93.2%, setting: 'PointNeXt-S, no voting'}
+      - {dataset: ShapeNetPart, metric: instance mIoU, value: 86.7%, setting: 'PointNeXt-S, voting'}
+      - {dataset: S3DIS Area 5, metric: mIoU, value: 70.5%, setting: PointNeXt-XL}
+      - {dataset: S3DIS 6-fold, metric: mIoU, value: 74.9%, setting: PointNeXt-XL}
+      paper_recipe:
+        optimizer: adamw
+        lr: 0.002
+        weight_decay: 0.05
+        schedule: cosine
+        scheduler: {kind: cosine}
+        batch_size: 32
+        epochs: 250
+        points: 1024
+        augmentation: [random rotation, random scaling, point resampling, height appending]
+        loss: cross-entropy with label smoothing 0.3
+        notes: ScanObjectNN recipe; ModelNet40 uses 600 epochs; S3DIS lr 0.01, 100 epochs, batch 8.
+      benchmark_datasets: [ScanObjectNN, ModelNet40, ShapeNetPart, S3DIS]
+      implementation_notes: Defaults are PointNeXt-S (width 32; blocks counts the stem, so no InvResMLP). Larger variants need more blocks per stage; the training recipe matters as much as the architecture.
+      checked: 2026-11-09, paper full text (ar5iv)
 
   dgcnn:
     display_name: DGCNN (EdgeConv)
@@ -164,6 +239,30 @@ models:
     receptive_field: {kind: global, note: k-NN neighbourhoods shrink physically as point density rises; global context via pooling.}
     resolution_transfer: partial
     keywords: [classification, segmentation, dynamic graph, knn, edge, local geometry]
+    outputs: [shape_label, point_label, point_field]
+    evidence:
+      paper: {title: Dynamic Graph CNN for Learning on Point Clouds, venue: ACM TOG 2019, url: 'https://arxiv.org/abs/1801.07829'}
+      reported:
+      - {dataset: ModelNet40, metric: overall accuracy, value: 92.9%, setting: '1024 points, k=20'}
+      - {dataset: ModelNet40, metric: overall accuracy, value: 93.5%, setting: '2048 points, k=40'}
+      - {dataset: ShapeNetPart, metric: mIoU, value: 85.2%}
+      - {dataset: S3DIS, metric: mIoU, value: 56.1%}
+      paper_recipe:
+        optimizer: sgd
+        lr: 0.1
+        momentum: 0.9
+        schedule: cosine annealing to 0.001
+        scheduler: {kind: cosine, eta_min: 0.001}
+        batch_size: 32
+        epochs: null
+        points: 1024
+        augmentation: [random scaling, point and object perturbation]
+        loss: cross-entropy
+        dropout: keep 0.5 in the last two FC layers
+      benchmark_datasets: [ModelNet40, ShapeNetPart, S3DIS]
+      implementation_notes: 'Matches the paper defaults: k=20, EdgeConv channels (64, 64, 128, 256), embedding 1024,
+        dropout 0.5.'
+      checked: 2026-11-09, paper full text (ar5iv)
 
   gcn:
     display_name: Graph Convolutional Network (GCN)
@@ -193,8 +292,18 @@ models:
     symmetries: [permutation]
     receptive_field: {kind: hops, depth_key: num_layers}
     resolution_transfer: false
-    docs: [docs/adding_a_network.md]
     keywords: [baseline, node, graph, diffusion, smooth]
+    outputs: [point_label, point_field]
+    evidence:
+      paper: {title: Semi-Supervised Classification with Graph Convolutional Networks, venue: ICLR 2017, url: 'https://arxiv.org/abs/1609.02907'}
+      reported:
+      - {dataset: Cora (citation graph), metric: node accuracy, value: 81.5%}
+      paper_recipe: {optimizer: adam, lr: 0.01, weight_decay: 0.0005, schedule: null, epochs: 200, batch_size: null,
+        notes: 'Citation-network recipe (dropout 0.5, early stopping); not a 3D benchmark.'}
+      benchmark_datasets: [Cora, Citeseer, Pubmed]
+      implementation_notes: 'Per-node outputs only (no graph-level head). Evaluated in the paper on citation graphs,
+        not meshes: treat as a baseline.'
+      checked: 2026-11-09, from the paper's well-known results; not re-read
 
   gat:
     display_name: Graph Attention Network (GAT)
@@ -223,8 +332,18 @@ models:
     symmetries: [permutation]
     receptive_field: {kind: hops, depth_key: num_layers}
     resolution_transfer: false
-    docs: [docs/adding_a_network.md]
     keywords: [attention, node, graph, anisotropic, interpretable]
+    outputs: [point_label, point_field]
+    evidence:
+      paper: {title: Graph Attention Networks, venue: ICLR 2018, url: 'https://arxiv.org/abs/1710.10903'}
+      reported:
+      - {dataset: Cora (citation graph), metric: node accuracy, value: 83.0%}
+      paper_recipe: {optimizer: adam, lr: 0.005, weight_decay: 0.0005, schedule: null, epochs: null, batch_size: null,
+        notes: 'Cora recipe: 8 heads x 8 features, dropout 0.6, early stopping.'}
+      benchmark_datasets: [Cora, Citeseer, Pubmed, PPI]
+      implementation_notes: 'Per-node outputs only. Evaluated in the paper on citation and protein graphs, not meshes:
+        treat as a baseline.'
+      checked: 2026-11-09, from the paper's well-known results; not re-read
 
   meshgraphnet:
     display_name: MeshGraphNet
@@ -256,6 +375,28 @@ models:
     receptive_field: {kind: hops, depth_key: processor_steps}
     resolution_transfer: partial
     keywords: [simulation, cfd, cloth, structural, rollout, time, transient, mesh, fluid, deformation]
+    outputs: [point_field]
+    evidence:
+      paper: {title: Learning Mesh-Based Simulation with Graph Networks, venue: ICLR 2021, url: 'https://arxiv.org/abs/2010.03409'}
+      reported:
+      - {dataset: CylinderFlow, metric: rollout-all RMSE (x1e-3), value: '40.88'}
+      - {dataset: DeformingPlate, metric: rollout-all RMSE (x1e-3), value: '15.1'}
+      - {dataset: FlagSimple, metric: rollout-all RMSE (x1e-3), value: '139.0'}
+      - {dataset: Airfoil, metric: rollout-all RMSE (x1e-3), value: '11529'}
+      - {dataset: all six datasets, metric: speedup vs. solver, value: 11x-290x on GPU}
+      paper_recipe:
+        optimizer: adam
+        lr: 0.0001
+        schedule: exponential decay to 1e-6 over 5M steps
+        batch_size: 2
+        epochs: null
+        steps: 10000000
+        loss: L2 on per-node outputs
+        augmentation: [training noise on inputs (std 1e-3 to 3e-3 for positions)]
+      benchmark_datasets: [CylinderFlow, Airfoil, FlagSimple, FlagDynamic, SphereDynamic, DeformingPlate]
+      implementation_notes: 'Matches the paper: 15 processor steps, latent 128, layer norm. Edge features (relative
+        positions, lengths) must be supplied by the caller.'
+      checked: 2026-11-09, paper full text (ar5iv)
 
   adaptive_meshgraphnet:
     display_name: Adaptive MeshGraphNet
@@ -288,12 +429,34 @@ models:
     docs: [docs/meshgraphnet.md]
     examples: [examples/adaptive_meshgraphnet_synthetic.py, tests/test_adaptive_meshgraphnet.py]
     keywords: [adaptive, remeshing, refinement, shock, contact, topology, rollout, transient]
+    outputs: [point_field]
+    evidence:
+      paper: {title: Learning Mesh-Based Simulation with Graph Networks, venue: ICLR 2021, url: 'https://arxiv.org/abs/2010.03409'}
+      reported:
+      - {dataset: CylinderFlow, metric: rollout-all RMSE (x1e-3), value: '40.88'}
+      - {dataset: DeformingPlate, metric: rollout-all RMSE (x1e-3), value: '15.1'}
+      - {dataset: FlagSimple, metric: rollout-all RMSE (x1e-3), value: '139.0'}
+      - {dataset: Airfoil, metric: rollout-all RMSE (x1e-3), value: '11529'}
+      - {dataset: all six datasets, metric: speedup vs. solver, value: 11x-290x on GPU}
+      paper_recipe:
+        optimizer: adam
+        lr: 0.0001
+        schedule: exponential decay to 1e-6 over 5M steps
+        batch_size: 2
+        epochs: null
+        steps: 10000000
+        loss: L2 on per-node outputs
+        augmentation: [training noise on inputs (std 1e-3 to 3e-3 for positions)]
+      benchmark_datasets: [CylinderFlow, Airfoil, FlagSimple, FlagDynamic, SphereDynamic, DeformingPlate]
+      implementation_notes: Same network as meshgraphnet; the paper's sizing-field remeshing is not implemented in this
+        repository.
+      checked: 2026-11-09, paper full text (ar5iv)
 
   meshnet:
     display_name: MeshNet
     paradigm: Face-based mesh CNN - per-face spatial and structural descriptors, mesh convolution over the 3 edge-adjacent faces, global max pool (Feng et al.).
     representations: [mesh_graph]
-    tasks: [segmentation_classification]
+    tasks: [segmentation_classification]  # shape classification only
     element: face
     inductive_biases:
       - Faces are the unit; each face sees its 3 edge neighbours per mesh convolution.
@@ -321,6 +484,27 @@ models:
     resolution_transfer: partial
     examples: [examples/train_mesh_classifier.py]
     keywords: [mesh, triangle, face, classification, modelnet, shape, cad, polygon soup]
+    outputs: [shape_label]
+    evidence:
+      paper: {title: 'MeshNet: Mesh Neural Network for 3D Shape Representation', venue: AAAI 2019, url: 'https://arxiv.org/abs/1811.11424'}
+      reported:
+      - {dataset: ModelNet40, metric: classification accuracy, value: 91.9%}
+      - {dataset: ModelNet40, metric: retrieval mAP, value: 81.9%}
+      paper_recipe:
+        optimizer: sgd
+        lr: 0.01
+        momentum: 0.9
+        weight_decay: 0.0005
+        schedule: null
+        batch_size: 64
+        epochs: null
+        faces: 1024
+        augmentation: [vertex jitter (std 0.01)]
+        loss: cross-entropy
+      benchmark_datasets: [ModelNet40]
+      implementation_notes: Shape classification only (no per-face segmentation head). Meshes are expected simplified
+        to <= 1024 faces as in the paper.
+      checked: 2026-11-09, paper full text (ar5iv)
 
   diffusionnet:
     display_name: DiffusionNet
@@ -338,7 +522,7 @@ models:
       - Classification (mass-weighted mean) and per-vertex segmentation; small model (~0.5M params).
     demerits:
       - Needs per-mesh precomputation (cotangent Laplacian eigenbasis, gradients) with SciPy on the CPU.
-      - Not rotation invariant with xyz inputs; set input_features="hks" (heat-kernel signatures) for invariance.
+      - Default xyz input is neither translation nor rotation invariant (measured); set input_features="hks" for both.
       - Very degenerate or non-manifold meshes give a poor cotangent Laplacian (no robust Laplacian here).
     complexity:
       time: O(L * (N * K * C + E * C + N * C^2))
@@ -348,17 +532,38 @@ models:
     speed: 4
     expressivity: 4
     dynamic_topology: true
-    symmetries: [permutation, translation]
+    symmetries: [permutation]  # translation + rotation only with input_features: hks (measured)
     receptive_field: {kind: global, note: Learned diffusion time can span the whole surface in one block.}
     resolution_transfer: true
     examples: [examples/train_mesh_classifier.py]
     keywords: [mesh, surface, diffusion, laplacian, spectral, classification, segmentation, remeshing, robust, modelnet]
+    outputs: [shape_label, point_label]
+    evidence:
+      paper: {title: 'DiffusionNet: Discretization Agnostic Learning on Surfaces', venue: ACM TOG 2022, url: 'https://arxiv.org/abs/2012.00888'}
+      reported:
+      - {dataset: SHREC'11, metric: accuracy, value: 99.0% (xyz) / 99.7% (hks), setting: 10 training meshes per class}
+      - {dataset: Human body segmentation, metric: accuracy, value: 90.6% (xyz) / 91.7% (hks)}
+      - {dataset: RNA mesh segmentation, metric: accuracy, value: 91.5% (xyz) / 91.0% (hks)}
+      - {dataset: FAUST correspondence, metric: mean geodesic error x100, value: '2.7'}
+      paper_recipe:
+        optimizer: adam
+        lr: 0.001
+        schedule: halved every 50 epochs
+        scheduler: {kind: step, every_epochs: 50, gamma: 0.5}
+        batch_size: 1
+        epochs: 200
+        augmentation: [random rotation when xyz input features are used]
+        notes: 4 blocks, width 32-256, k_eig 128; hks input for rotation invariance.
+      benchmark_datasets: [SHREC'11, Human body segmentation (Maron et al. 2017), RNA meshes, FAUST, SCAPE]
+      implementation_notes: Default input_features='xyz' is NOT translation or rotation invariant (measured); input_features='hks'
+        is.
+      checked: 2026-11-09, paper full text (ar5iv)
 
   meshwalker:
     display_name: MeshWalker
     paradigm: Random walks along mesh edges; per-step xyz displacements read by stacked GRUs (Lahav and Tal).
     representations: [mesh_graph]
-    tasks: [segmentation_classification]
+    tasks: [segmentation_classification]  # shape classification only in this implementation
     element: vertex
     inductive_biases:
       - Shape is explored as sequences of edge steps; the RNN aggregates geometry along each walk.
@@ -367,7 +572,7 @@ models:
     merits:
       - Reads the raw vertex/edge structure; no manifoldness or remeshing required.
       - Memory independent of mesh size; cost set by walk length and walk count.
-      - Reported about 92% on ModelNet40 in the paper.
+      - 92.3% on ModelNet40 and 98.6% on SHREC'11 in the paper.
     demerits:
       - Stochastic predictions; needs several walks at test time (num_walks_eval).
       - Sequential GRUs are slow, especially on CPU; long walks train slowly.
@@ -386,6 +591,27 @@ models:
     resolution_transfer: partial
     examples: [examples/train_mesh_classifier.py]
     keywords: [mesh, random walk, rnn, gru, sequence, classification, modelnet, shape]
+    outputs: [shape_label]
+    evidence:
+      paper: {title: 'MeshWalker: Deep Mesh Understanding by Random Walks', venue: ACM TOG 2020, url: 'https://arxiv.org/abs/2006.05353'}
+      reported:
+      - {dataset: SHREC'11, metric: accuracy, value: 98.6%, setting: split 16}
+      - {dataset: ModelNet40, metric: accuracy, value: 92.3%}
+      - {dataset: Cube engraving, metric: accuracy, value: 98.6%}
+      - {dataset: Human body segmentation, metric: face accuracy, value: 92.7%}
+      paper_recipe:
+        optimizer: adam
+        lr: 0.0005
+        schedule: cyclic, 1e-6 to 5e-4, 20k-iteration cycle
+        batch_size: 32
+        epochs: null
+        steps: 60000
+        augmentation: [random rotation about each axis every iteration]
+        notes: Batch = 32 walks; walk length about 0.4 x vertex count; 200k iterations for ModelNet40.
+      benchmark_datasets: [SHREC'11, ModelNet40, Cube engraving, COSEG, Human body segmentation]
+      implementation_notes: Classification only (the paper also segments). Default walk_length=200 and num_walks=1 differ
+        from the paper's 0.4 x V and 32 walks.
+      checked: 2026-11-09, paper full text (ar5iv)
 
   unet3d:
     display_name: 3D U-Net
@@ -418,6 +644,25 @@ models:
     receptive_field: {kind: conv_grid, depth_key: levels, kernel_key: kernel_size}
     resolution_transfer: false
     keywords: [voxel, volumetric, segmentation, medical, ct, dense, grid, image]
+    outputs: [point_label, point_field]
+    evidence:
+      paper: {title: '3D U-Net: Learning Dense Volumetric Segmentation from Sparse Annotation', venue: MICCAI 2016,
+        url: 'https://arxiv.org/abs/1606.06650'}
+      reported:
+      - {dataset: Xenopus kidney (confocal), metric: IoU, value: '0.863', setting: 'semi-automated, 3-fold CV'}
+      - {dataset: Xenopus kidney (confocal), metric: IoU, value: '0.704', setting: fully automated}
+      paper_recipe:
+        optimizer: sgd
+        lr: null
+        schedule: null
+        batch_size: 1
+        epochs: null
+        steps: 70000
+        augmentation: [rotation, scaling, gray-value, smooth elastic deformation]
+        loss: weighted softmax cross-entropy; unlabeled voxels get weight 0
+      benchmark_datasets: [Xenopus kidney]
+      implementation_notes: Per-voxel outputs; regression use (surrogate fields) is an extension beyond the paper.
+      checked: 2026-11-09, paper full text (ar5iv)
 
   fno3d:
     display_name: Fourier Neural Operator (FNO3D)
@@ -451,6 +696,27 @@ models:
     receptive_field: {kind: global, note: append_coordinates=True (default) breaks translation equivariance.}
     resolution_transfer: true
     keywords: [operator, pde, darcy, navier-stokes, heat, parametric, super-resolution, spectral, periodic, grid]
+    outputs: [point_field]
+    evidence:
+      paper: {title: Fourier Neural Operator for Parametric Partial Differential Equations, venue: ICLR 2021, url: 'https://arxiv.org/abs/2010.08895'}
+      reported:
+      - {dataset: Darcy flow (421 grid), metric: relative L2, value: '0.0098'}
+      - {dataset: Navier-Stokes nu=1e-3, metric: relative L2, value: '0.0086', setting: FNO-3D}
+      - {dataset: Navier-Stokes nu=1e-4, metric: relative L2, value: '0.0820', setting: 'FNO-3D, 10k samples'}
+      - {dataset: Burgers, metric: relative L2, value: 0.0139-0.0160}
+      paper_recipe:
+        optimizer: adam
+        lr: 0.001
+        schedule: halved every 100 epochs
+        scheduler: {kind: step, every_epochs: 100, gamma: 0.5}
+        batch_size: null
+        epochs: 500
+        loss: relative L2
+        notes: 1000 training / 200 test instances; 4 Fourier layers, 12 modes, width 32 (2D).
+      benchmark_datasets: [Darcy flow, Navier-Stokes (2D + time), Burgers]
+      implementation_notes: Default modes 12 and width 32 follow the paper's 2D setting; padding 0 assumes a periodic
+        domain.
+      checked: 2026-11-09, paper full text (ar5iv)
 
   gino:
     display_name: Geometry-Informed Neural Operator (GINO)
@@ -480,6 +746,27 @@ models:
     receptive_field: {kind: global}
     resolution_transfer: true
     keywords: [operator, irregular, geometry, aerodynamics, car, pressure, query, pde, cfd]
+    outputs: [point_field]
+    evidence:
+      paper: {title: Geometry-Informed Neural Operator for Large-Scale 3D PDEs, venue: NeurIPS 2023, url: 'https://arxiv.org/abs/2309.00583'}
+      reported:
+      - {dataset: Shape-Net Car (surface pressure), metric: relative L2, value: 7.12%}
+      - {dataset: Ahmed body (surface pressure), metric: relative L2, value: 8.31%}
+      - {dataset: Ahmed body, metric: 'relative L2, MeshGraphNet baseline', value: 13.88%}
+      paper_recipe:
+        optimizer: adam
+        lr: 0.00025
+        schedule: halved at epoch 50
+        scheduler:
+          kind: multistep
+          milestones: [50]
+          gamma: 0.5
+        batch_size: null
+        epochs: 100
+        loss: normalized L2
+      benchmark_datasets: [Shape-Net Car (CFD), Ahmed body (CFD)]
+      implementation_notes: Smaller latent grid (16^3) than the paper; check resolution against the car/body size.
+      checked: 2026-11-09, paper full text (ar5iv)
 
   transolver:
     display_name: Transolver
@@ -512,6 +799,19 @@ models:
     receptive_field: {kind: global}
     resolution_transfer: true
     keywords: [operator, pde, transformer, attention, irregular, airfoil, elasticity, cfd, global]
+    outputs: [point_field]
+    evidence:
+      paper: {title: 'Transolver: A Fast Transformer Solver for PDEs on General Geometries', venue: ICML 2024, url: 'https://arxiv.org/abs/2402.02366'}
+      reported:
+      - {dataset: Six standard PDE benchmarks, metric: average relative gain, value: 22%}
+      - {dataset: Shape-Net Car, metric: surface relative L2, value: '0.0745'}
+      - {dataset: Shape-Net Car, metric: volume relative L2, value: '0.0207'}
+      - {dataset: AirfRANS, metric: surface relative L2, value: '0.0142'}
+      paper_recipe: {optimizer: adam, lr: 0.001, schedule: null, batch_size: 1, epochs: 200, loss: relative L2, notes: 'Shape-Net
+          Car recipe; 8 layers, 256 channels, 32 slices; Elasticity 500 epochs, AirfRANS 400.'}
+      benchmark_datasets: [Elasticity, Plasticity, Airfoil, Pipe, Navier-Stokes, Darcy, Shape-Net Car, AirfRANS]
+      implementation_notes: Matches the paper's 256-channel / 32-slice / 8-layer setting.
+      checked: 2026-11-09, paper full text (ar5iv)
 
   siren:
     display_name: SIREN
@@ -519,7 +819,7 @@ models:
     representations: [continuous_coords]
     also_accepts:
       point_cloud: Use point coordinates as query locations.
-    tasks: [field_fitting, pde_operator]
+    tasks: [field_fitting]  # one PDE instance per network (PINN); operators: fno3d, gino, transolver
     element: query point
     inductive_biases:
       - Smooth, high-frequency-capable continuous fields; derivatives are again SIRENs.
@@ -539,10 +839,22 @@ models:
     speed: 5
     expressivity: 3
     dynamic_topology: false
-    symmetries: []
+    symmetries: [permutation]
     receptive_field: {kind: pointwise}
     resolution_transfer: true
     keywords: [implicit, sdf, pinn, coordinate, continuous, derivative, high-frequency, neural field]
+    outputs: [point_field]
+    evidence:
+      paper: {title: Implicit Neural Representations with Periodic Activation Functions, venue: NeurIPS 2020, url: 'https://arxiv.org/abs/2006.09661'}
+      reported:
+      - {dataset: Video fitting, metric: PSNR, value: about 30 dB (about 5 dB above ReLU)}
+      - {dataset: CelebA inpainting (hypernetwork prior), metric: MSE, value: '0.009', setting: 100 context pixels}
+      paper_recipe: {optimizer: adam, lr: null, schedule: null, batch_size: null, epochs: null, notes: omega_0 = 30
+          with the paper's uniform init; SDF fitting uses on- and off-surface samples per batch.}
+      benchmark_datasets: [Images, Video, Audio, SDF from oriented point clouds, Helmholtz / wave equations]
+      implementation_notes: Fits one signal or one PDE instance per network (no geometry encoder). The paper gives no
+        numbers for SDF or PDE tasks.
+      checked: 2026-11-09, paper full text (ar5iv)
 
   mlp:
     display_name: Coordinate MLP
@@ -550,7 +862,7 @@ models:
     representations: [continuous_coords]
     also_accepts:
       point_cloud: Use point coordinates as query locations.
-    tasks: [field_fitting, pde_operator]
+    tasks: [field_fitting]  # one PDE instance per network (PINN); operators: fno3d, gino, transolver
     element: query point
     inductive_biases:
       - Spectral bias toward low-frequency, smooth functions.
@@ -568,16 +880,26 @@ models:
     speed: 5
     expressivity: 1
     dynamic_topology: false
-    symmetries: []
+    symmetries: [permutation]
     receptive_field: {kind: pointwise}
     resolution_transfer: true
     keywords: [pinn, baseline, coordinate, smooth, continuous]
+    outputs: [point_field]
+    evidence:
+      paper: {title: 'Physics Informed Deep Learning (Part I): Data-driven Solutions of Nonlinear PDEs', venue: arXiv
+          2017 (JCP 2019), url: 'https://arxiv.org/abs/1711.10561'}
+      reported: []
+      paper_recipe: {optimizer: null, lr: null, schedule: null, batch_size: null, epochs: null, notes: Training recipe
+          not checked against the paper.}
+      benchmark_datasets: [Burgers, Schroedinger, Allen-Cahn]
+      implementation_notes: Coordinate MLP baseline (tanh). Solves one PDE instance per network.
+      checked: 2026-11-09, abstract only
 
   deep_nurbs:
     display_name: Deep NURBS
     paradigm: NURBS-admissible PINN ansatz - phi * NN(x) + zeta on a parametric surface so boundary conditions hold exactly.
     representations: [continuous_coords]
-    tasks: [field_fitting, pde_operator]
+    tasks: [field_fitting]  # one PDE instance per network (PINN); operators: fno3d, gino, transolver
     element: query point
     inductive_biases:
       - Exact imposition of Dirichlet boundary conditions via a NURBS distance-like function.
@@ -596,11 +918,23 @@ models:
     speed: 5
     expressivity: 2
     dynamic_topology: false
-    symmetries: []
+    symmetries: [permutation]
     receptive_field: {kind: pointwise}
     resolution_transfer: true
     boundary_conditions: hard_dirichlet
     keywords: [nurbs, cad, isogeometric, boundary condition, pinn, surface, parametric]
+    outputs: [point_field]
+    evidence:
+      paper: {title: Deep NURBS - Admissible Physics-informed Neural Networks, venue: arXiv 2022 (Engineering with Computers
+          2024), url: 'https://arxiv.org/abs/2210.13900'}
+      reported:
+      - {dataset: 2D elliptic PDEs on arbitrary geometries, metric: convergence, value: markedly faster than a classical
+          PINN (authors' claim)}
+      paper_recipe: {optimizer: null, lr: null, schedule: null, batch_size: null, epochs: null, notes: Training recipe
+          not checked against the paper.}
+      benchmark_datasets: [2D elliptic PDEs (paper-specific geometries)]
+      implementation_notes: 2D parametric coordinates [B, N, 2] only (measured); one geometry per network.
+      checked: 2026-11-09, abstract only
 
   pcn:
     display_name: PCN (Point Completion Network)
@@ -634,6 +968,18 @@ models:
     receptive_field: {kind: global, note: Every output point sees the global code; no local input context is carried to the decoder.}
     resolution_transfer: partial
     keywords: [completion, partial, occlusion, scan, coarse-to-fine, densify, upsample]
+    outputs: [point_set]
+    evidence:
+      paper: {title: 'PCN: Point Completion Network', venue: 3DV 2018, url: 'https://arxiv.org/abs/1808.00671'}
+      reported:
+      - {dataset: ShapeNet (8 categories), metric: mean Chamfer distance, value: '0.009665', setting: 'PCN-CD, seen
+          categories'}
+      paper_recipe: {optimizer: adam, lr: 0.0001, schedule: x0.7 every 50k iterations, batch_size: 32, epochs: 50, loss: coarse
+          CD/EMD + alpha x fine CD, notes: Coarse 1024 / fine 16384 output points.}
+      benchmark_datasets: ['ShapeNet completion (PCN, 8 categories)', KITTI cars (qualitative)]
+      implementation_notes: Default output is 256 coarse / 1024 fine points, much smaller than the paper's 1024 / 16384;
+        the dashboard trains fine-output Chamfer only.
+      checked: 2026-11-09, paper full text (ar5iv)
 
   foldingnet:
     display_name: FoldingNet
@@ -666,6 +1012,18 @@ models:
     receptive_field: {kind: global, note: Every output point sees only the global codeword.}
     resolution_transfer: partial
     keywords: [completion, autoencoder, reconstruction, folding, unsupervised, upsample]
+    outputs: [point_set]
+    evidence:
+      paper: {title: 'FoldingNet: Point Cloud Auto-encoder via Deep Grid Deformation', venue: CVPR 2018, url: 'https://arxiv.org/abs/1712.07262'}
+      reported:
+      - {dataset: ModelNet40, metric: linear-SVM transfer accuracy, value: 88.4%, setting: auto-encoder trained on ShapeNet}
+      - {dataset: ModelNet10, metric: linear-SVM transfer accuracy, value: 94.4%}
+      paper_recipe: {optimizer: adam, lr: 0.0001, schedule: null, batch_size: 1, epochs: 278, points: 2048, loss: extended
+          Chamfer distance}
+      benchmark_datasets: [ShapeNet, ModelNet40, ModelNet10]
+      implementation_notes: Grid 32 x 32 = 1024 output points (paper 45 x 45); PointNet-style encoder instead of the
+        paper's graph encoder. The paper is an auto-encoder, not a completion network.
+      checked: 2026-11-09, paper full text (ar5iv)
 
   pointpillars:
     display_name: PointPillars
@@ -700,6 +1058,24 @@ models:
     receptive_field: {kind: global, note: 2D CNN receptive field over the BEV grid (about 30 m at defaults); no global pooling.}
     resolution_transfer: false
     keywords: [detection, lidar, bounding box, autonomous driving, outdoor, car, pedestrian, kitti, bev]
+    outputs: [boxes]
+    evidence:
+      paper: {title: 'PointPillars: Fast Encoders for Object Detection from Point Clouds', venue: CVPR 2019, url: 'https://arxiv.org/abs/1812.05784'}
+      reported:
+      - {dataset: KITTI test, metric: BEV mAP, value: '66.19', setting: 62 Hz}
+      - {dataset: KITTI test, metric: 3D mAP, value: '59.20', setting: 62 Hz}
+      paper_recipe:
+        optimizer: adam
+        lr: 0.0002
+        schedule: x0.8 every 15 epochs
+        scheduler: {kind: step, every_epochs: 15, gamma: 0.8}
+        batch_size: 2
+        epochs: 160
+        augmentation: [ground-truth database sampling, per-box rotation and translation, 'global flip, rotation, scaling']
+        loss: focal classification + 2 x localization + 0.2 x direction
+      benchmark_datasets: [KITTI]
+      implementation_notes: 'Matches the paper: 0.16 m pillars and the car / pedestrian / cyclist anchors.'
+      checked: 2026-11-09, paper full text (ar5iv)
 
   votenet:
     display_name: VoteNet
@@ -733,6 +1109,29 @@ models:
     receptive_field: {kind: global, note: Seed features see up to the last ball radius (1.2 m); proposals aggregate votes within proposal_radius.}
     resolution_transfer: partial
     keywords: [detection, indoor, scan, bounding box, votes, hough, scannet, sun rgb-d, furniture]
+    outputs: [boxes]
+    evidence:
+      paper: {title: Deep Hough Voting for 3D Object Detection in Point Clouds, venue: ICCV 2019, url: 'https://arxiv.org/abs/1904.09664'}
+      reported:
+      - {dataset: ScanNet, metric: mAP@0.25, value: '58.6', setting: geometry only}
+      - {dataset: ScanNet, metric: mAP@0.5, value: '33.5'}
+      - {dataset: SUN RGB-D, metric: mAP@0.25, value: '57.7'}
+      paper_recipe:
+        optimizer: adam
+        lr: 0.001
+        schedule: /10 at epochs 80 and 120
+        scheduler:
+          kind: multistep
+          milestones: [80, 120]
+          gamma: 0.1
+        batch_size: 8
+        epochs: null
+        points: 40000
+        augmentation: [random subsampling, horizontal flip, rotation +-5 deg, scaling 0.9-1.1]
+        loss: vote + objectness + box + semantic
+      benchmark_datasets: [ScanNet, SUN RGB-D]
+      implementation_notes: Default mean_sizes is a single placeholder class; set the dataset's class mean sizes.
+      checked: 2026-11-09, paper full text (ar5iv)
 
   dcp:
     display_name: DCP (Deep Closest Point)
@@ -767,3 +1166,27 @@ models:
     receptive_field: {kind: global, note: Each point embedding sees its feature-space k-NN, then attends to every point of both clouds through the transformer.}
     resolution_transfer: partial
     keywords: [registration, alignment, align, pose, rigid, icp, correspondence, scan matching, modelnet40]
+    outputs: [rigid_pose]
+    evidence:
+      paper: {title: 'Deep Closest Point: Learning Representations for Point Cloud Registration', venue: ICCV 2019,
+        url: 'https://arxiv.org/abs/1905.03304'}
+      reported:
+      - {dataset: ModelNet40 (unseen shapes), metric: rotation MAE (deg), value: '0.77', setting: DCP-v2}
+      - {dataset: ModelNet40 (unseen categories), metric: rotation MAE (deg), value: '2.01', setting: DCP-v2}
+      - {dataset: ModelNet40 (Gaussian noise), metric: rotation MAE (deg), value: '0.74', setting: DCP-v2}
+      paper_recipe:
+        optimizer: adam
+        lr: 0.001
+        schedule: /10 at epochs 75, 150 and 200
+        scheduler:
+          kind: multistep
+          milestones: [75, 150, 200]
+          gamma: 0.1
+        batch_size: null
+        epochs: 250
+        points: 1024
+        augmentation: ['pairs from random rotations of 0-45 deg per axis and translations in [-0.5, 0.5]']
+        loss: rotation + translation MSE + Tikhonov regularizer
+      benchmark_datasets: [ModelNet40 (synthetic rigid pairs)]
+      implementation_notes: Rigid registration only; full-overlap pairs in the paper (partial overlap is out of distribution).
+      checked: 2026-11-09, paper full text (ar5iv)

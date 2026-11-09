@@ -61,6 +61,7 @@ class AdvisorBridge:
         target_metric: str = "accuracy",
         top_k: int = 5,
         dynamic_topology: bool = False,
+        required_output: str | None = None,
     ) -> dict[str, Any]:
         """Ranked models for a problem; each row gains ``fits_vram`` against ``vram_gb``.
 
@@ -73,7 +74,7 @@ class AdvisorBridge:
             # Task names are matched by keyword, so turn "surrogate_simulation" into "surrogate simulation".
             result = self.advisor.recommend_architecture(
                 problem_type.replace("_", " "), representation, num_nodes, dynamic_topology=dynamic_topology,
-                target_metric=target_metric, top_k=top_k,
+                target_metric=target_metric, top_k=top_k, required_output=required_output,
             )
         else:
             result = self._fallback_recommendations(representation, num_nodes, top_k)
@@ -100,6 +101,19 @@ class AdvisorBridge:
         if self.advisor is not None:
             return {**self.advisor.estimate_resource_footprint(model_name, num_nodes, batch_size, precision), "source": self.source}
         return self._fallback_memory(model_name, num_nodes, batch_size, precision)
+
+    def training_setup(
+        self, model_name: str, num_nodes: int, vram_gb: float, assumptions: dict[str, Any] | None = None
+    ) -> dict[str, Any] | None:
+        """Paper-based training settings with reasons (guardrails.recommend_training_setup); None on the fallback."""
+        if self.advisor is None:
+            return None
+        from tools.mcp_advisor import guardrails
+
+        a = assumptions or {}
+        return guardrails.recommend_training_setup(
+            self.advisor, model_name, num_nodes, vram_gb, a.get("required_symmetries"), a.get("target_kind", "scalar")
+        )
 
     def preflight(
         self,

@@ -496,6 +496,130 @@ def estimate_training_budget(
 # ---------------------------------------------------------------- benchmark workflow
 
 
+DASHBOARD_OPTIMIZERS = ("adam", "adamw", "sgd")
+
+
+def lr_schedule_spec(scheduler: dict[str, Any] | None, scale: float = 1.0) -> str:
+    """Paper scheduler (catalog ``paper_recipe.scheduler``, in paper epochs) as the trainer's schedule string,
+    with epoch counts multiplied by ``scale``: ``none`` | ``cosine:<eta_min>`` | ``step:<every>:<gamma>``
+    | ``multistep:<e1>,<e2>:<gamma>``."""
+    kind = (scheduler or {}).get("kind")
+    if kind == "cosine":
+        return f"cosine:{scheduler.get('eta_min', 0.0)}"
+    if kind == "step":
+        return f"step:{max(1, round(scheduler['every_epochs'] * scale))}:{scheduler['gamma']}"
+    if kind == "multistep":
+        milestones = sorted({max(1, round(m * scale)) for m in scheduler["milestones"]})
+        return f"multistep:{','.join(map(str, milestones))}:{scheduler['gamma']}"
+    return "none"
+
+
+def recommend_training_setup(
+    advisor: Advisor,
+    model_name: str,
+    num_elements: int,
+    vram_gb: float = 8.0,
+    required_symmetries: list[str] | None = None,
+    target_kind: str = "scalar",
+    max_epochs: int = 300,
+) -> dict[str, Any]:
+    """Training settings from the model's paper recipe (catalog ``evidence.paper_recipe``), adapted to the
+    problem: VRAM caps the batch, required rotation symmetry adds augmentation or invariant inputs.
+    Every setting comes with the reason it was chosen; ``warnings`` list what the paper does not state."""
+    if num_elements <= 0 or vram_gb <= 0 or max_epochs <= 0:
+        raise ValueError("num_elements, vram_gb and max_epochs must be positive.")
+    model = advisor.resolve(model_name)
+    meta, name = model["metadata"], model["name"]
+    evidence = meta.get("evidence") or {}
+    recipe = evidence.get("paper_recipe") or {}
+    paper = evidence.get("paper") or {}
+    cite = f"{paper.get('title', name)} ({paper.get('venue', 'paper')})"
+    reasons: list[str] = []
+    warnings: list[str] = []
+    missing = [key for key in ("optimizer", "lr", "batch_size", "epochs") if recipe.get(key) is None]
+    if missing:
+        warnings.append(f"The paper does not state {', '.join(missing)}; defaults are used for those.")
+
+    optimizer = recipe.get("optimizer") if recipe.get("optimizer") in DASHBOARD_OPTIMIZERS else "adam"
+    lr = float(recipe.get("lr") or 1e-3)
+    momentum = float(recipe.get("momentum") or (0.9 if optimizer == "sgd" else 0.0))
+    weight_decay = float(recipe.get("weight_decay") or 0.0)
+    reasons.append(f"Optimizer {optimizer}, learning rate {lr:g}"
+                   + (f", momentum {momentum:g}" if optimizer == "sgd" else "")
+                   + (f", weight decay {weight_decay:g}" if weight_decay else "")
+                   + (f": as in {cite}." if recipe.get("optimizer") and recipe.get("lr") else
+                      ": Adam at 1e-3 because the paper does not state its optimizer or learning rate."))
+
+    paper_epochs = recipe.get("epochs")
+    epochs = min(int(paper_epochs), max_epochs) if paper_epochs else min(100, max_epochs)
+    if paper_epochs and epochs < paper_epochs:
+        reasons.append(f"{epochs} epochs: the paper trains {paper_epochs}; capped at {max_epochs}, schedule scaled to match.")
+    elif paper_epochs:
+        reasons.append(f"{epochs} epochs, as in the paper.")
+    else:
+        reasons.append(f"{epochs} epochs: the paper gives no epoch count"
+                       + (f" ({recipe['steps']:,} iterations)." if recipe.get("steps") else "."))
+    schedule = lr_schedule_spec(recipe.get("scheduler"), epochs / paper_epochs if paper_epochs else 1.0)
+    if schedule != "none":
+        reasons.append(f"LR schedule {schedule}: the paper's '{recipe.get('schedule')}'.")
+    elif recipe.get("schedule"):
+        warnings.append(f"The paper's schedule '{recipe['schedule']}' is iteration-based or cyclic; "
+                        "the dashboard keeps the learning rate constant.")
+
+    paper_batch = recipe.get("batch_size")
+    batching = recommend_batching_strategy(advisor, name, num_elements, vram_gb, int(paper_batch or 8))
+    batch = max(1, min(int(paper_batch or 8), batching["micro_batch"] or 1))
+    if batching["micro_batch"] == 0:
+        warnings.append(f"One sample of {num_elements:,} {meta['element']}s may not fit in {vram_gb:g} GB; "
+                        "lower the points per sample.")
+    if paper_batch and batch < paper_batch:
+        reasons.append(f"Batch {batch}: the paper uses {paper_batch}, but the memory estimate fits only {batch} "
+                       f"samples of {num_elements:,} elements in {vram_gb:g} GB.")
+    else:
+        reasons.append(f"Batch {batch}" + (": as in the paper." if paper_batch else
+                                           ": the paper does not state one; 8 fits the memory estimate."))
+    if batch < 4 and _defaults(model).get("normalization") == "batch":
+        warnings.append(f"Batch {batch} with BatchNorm gives noisy statistics.")
+    if recipe.get("points") and recipe["points"] != num_elements:
+        reasons.append(f"{num_elements:,} points per sample from your problem (the paper used {recipe['points']:,}).")
+
+    model_config: dict[str, Any] = {}
+    augment_rotation = False
+    if "rotation" in (required_symmetries or []) and "rotation" not in meta.get("symmetries", []):
+        if name == "diffusionnet":
+            model_config["input_features"] = "hks"
+            reasons.append("input_features='hks': you need rotation invariance; heat-kernel signatures are "
+                           "rotation invariant and the paper reports equal or better accuracy with them "
+                           "(SHREC'11 99.7%).")
+        elif target_kind in ("vector", "tensor"):
+            warnings.append("Rotation is required but the target is a vector/tensor: rotating only the inputs "
+                            "would corrupt the labels. Use an equivariant model or rotate targets too.")
+        else:
+            augment_rotation = True
+            reasons.append(f"Random rotation augmentation: you need rotation invariance and {meta['display_name']} "
+                           "is not rotation invariant (checked numerically).")
+    other_aug = [a for a in recipe.get("augmentation") or [] if "rotation" not in a]
+    if other_aug:
+        warnings.append("The paper also uses " + "; ".join(other_aug) + ". The dashboard does not apply these.")
+    if evidence.get("implementation_notes"):
+        warnings.append("Implementation vs paper: " + evidence["implementation_notes"])
+
+    return {
+        "model": name,
+        "paper": paper,
+        "paper_recipe": recipe,
+        "setup": {
+            "optimizer": optimizer, "learning_rate": lr, "momentum": momentum, "weight_decay": weight_decay,
+            "lr_schedule": schedule, "epochs": epochs, "batch_size": batch, "num_points": num_elements,
+            "augment_rotation": augment_rotation, "model_config": model_config,
+        },
+        "reasons": reasons,
+        "warnings": warnings,
+        "benchmark_datasets": evidence.get("benchmark_datasets", []),
+        "checked": evidence.get("checked", "not checked against the paper"),
+    }
+
+
 def generate_benchmark_config(
     advisor: Advisor,
     model_name: str,
@@ -514,6 +638,8 @@ def generate_benchmark_config(
     budget = estimate_training_budget(advisor, model["name"], num_elements, dataset_size, epochs, gpu,
                                       batching["precision"])
     model_config = {k: v for k, v in _defaults(model).items() if k not in ("metadata", "name", "model_type")}
+    recipe = recommend_training_setup(advisor, model["name"], num_elements, vram, max_epochs=epochs)
+    setup = recipe["setup"]
 
     config = {
         "model": {"name": registry_name, "config": model_config},
@@ -531,8 +657,10 @@ def generate_benchmark_config(
             "micro_batch": max(1, batching["micro_batch"]),
             "gradient_accumulation_steps": batching["gradient_accumulation_steps"] or 1,
             "epochs": epochs,
-            "optimizer": {"name": "adam", "lr": 1.0e-3},
-            "scheduler": {"name": "cosine", "warmup_epochs": max(1, epochs // 20)},
+            "optimizer": {"name": setup["optimizer"], "lr": setup["learning_rate"], "momentum": setup["momentum"],
+                          "weight_decay": setup["weight_decay"]},
+            "lr_schedule": setup["lr_schedule"],  # from the paper; see recommend_training_setup
+            "paper": recipe["paper"].get("url"),
             "grad_clip_norm": 1.0,
             "seed": 0,
         },
@@ -547,8 +675,11 @@ from models import ModelRegistry
 cfg = yaml.safe_load(open("benchmark_{registry_name}.yaml"))
 model = ModelRegistry.create(cfg["model"]["name"], cfg["model"]["config"]).cuda()
 train = cfg["training"]
-optimizer = torch.optim.Adam(model.parameters(), lr=train["optimizer"]["lr"])
-scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=train["epochs"])
+opt = train["optimizer"]
+optimizer = {{"adam": torch.optim.Adam, "adamw": torch.optim.AdamW, "sgd": torch.optim.SGD}}[opt["name"]](
+    model.parameters(), lr=opt["lr"], weight_decay=opt["weight_decay"],
+    **({{"momentum": opt["momentum"]}} if opt["name"] == "sgd" else {{}}))
+scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=train["epochs"])  # paper schedule: train["lr_schedule"]
 dtype = torch.bfloat16 if train["precision"] == "bf16" else None
 loader = ...  # DataLoader yielding (ModelInput, target); see {model["examples"][0] if model["examples"] else "examples/"}
 

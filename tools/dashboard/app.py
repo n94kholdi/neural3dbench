@@ -167,6 +167,9 @@ DOWNLOADS = {
 }
 # Mesh downloads: dashboard dataset name -> data_sources.MESH_DATASETS key.
 MESH_DOWNLOADS = {"modelnet10_mesh": "modelnet10", "shrec11": "shrec11"}
+# What each download is labelled with (tools/mcp_advisor/advisor.OUTPUTS), to offer only fitting ones.
+DOWNLOAD_OUTPUTS = {"shapenet_part": "point_label", "modelnet10": "shape_label", "modelnet40": "shape_label",
+                    "modelnet10_mesh": "shape_label", "shrec11": "shape_label"}
 
 SAMPLES = {
     "shape:sphere": "Sphere (examples/train_pointnet_synthetic.py)",
@@ -217,6 +220,10 @@ def form_values(config: Any) -> dict[str, Any]:
         "train_lr": config.learning_rate,
         "train_batch": config.batch_size,
         "train_optimizer": config.optimizer,
+        "train_momentum": config.momentum,
+        "train_weight_decay": config.weight_decay,
+        "train_schedule": config.lr_schedule,
+        "train_augment_rotation": config.augment_rotation,
         "train_samples": config.num_samples,
         "train_points": config.num_points,
         "train_experiment": config.experiment_name,
@@ -238,6 +245,10 @@ def config_from_form(state: Any) -> Any:
         learning_rate=float(state["train_lr"]),
         batch_size=int(state["train_batch"]),
         optimizer=state["train_optimizer"],
+        momentum=float(state["train_momentum"]),
+        weight_decay=float(state["train_weight_decay"]),
+        lr_schedule=state["train_schedule"].strip() or "none",
+        augment_rotation=bool(state["train_augment_rotation"]),
         num_samples=int(state["train_samples"]),
         num_points=int(state["train_points"]),
         experiment_name=state["train_experiment"].strip() or "neural3dbench",
@@ -312,7 +323,8 @@ def main() -> None:
         BUILTIN_DATASETS,
         DATA_DIR,
         DATASETS,
-        dataset_for_problem,
+        choose_dataset,
+        compatible_datasets,
         evaluation_figure,
         input_mismatch,
         make_dataset,
@@ -348,6 +360,11 @@ def main() -> None:
         return load_sample(name, num_points)
 
     @st.cache_data(show_spinner=False)
+    def cached_compatible(model_name: str, required_output: str | None, dataset_count: int) -> list[str]:
+        """dataset_count is a cache key only: a download or upload registers new datasets."""
+        return compatible_datasets(model_name, required_output)
+
+    @st.cache_data(show_spinner=False)
     def cached_input_mismatch(model_name: str, dataset_name: str) -> str | None:
         return input_mismatch(model_name, dataset_name)
 
@@ -360,11 +377,27 @@ def main() -> None:
     for key, value in form_values(TrainingConfig(device=default_device())).items():
         st.session_state.setdefault(key, value)
 
-    def use_model(name: str) -> None:
+    def use_model(name: str, benchmarks: list[str]) -> None:
+        """Fill the Training tab for ``name``: paper-based settings, a dataset for the problem, and the reasons."""
+        problem = st.session_state.get("problem") or {}
         st.session_state["train_model"] = name
-        dataset = st.session_state.get("problem_dataset")
+        dataset, dataset_reason = choose_dataset(name, problem.get("required_output"), problem.get("task", ""),
+                                                 benchmarks)
         if dataset:
             st.session_state["train_dataset"] = dataset
+        setup = bridge.training_setup(name, problem.get("num_nodes", 1024), problem.get("vram_gb", 8.0),
+                                      problem.get("assumptions"))
+        if setup:
+            s = setup["setup"]
+            st.session_state.update({
+                "train_optimizer": s["optimizer"], "train_lr": s["learning_rate"], "train_momentum": s["momentum"],
+                "train_weight_decay": s["weight_decay"], "train_schedule": s["lr_schedule"], "train_epochs": s["epochs"],
+                "train_batch": s["batch_size"], "train_points": s["num_points"],
+                "train_augment_rotation": s["augment_rotation"] and not (dataset and DATASETS[dataset].mesh),
+                "train_model_config": json.dumps(s["model_config"]),
+            })
+        st.session_state["train_reasons"] = {"model": name, "dataset": dataset, "dataset_reason": dataset_reason,
+                                             "setup": setup}
         st.toast(f"{name} selected in the Training tab" + (f" with the {dataset} dataset." if dataset else "."))
 
     @st.cache_data(ttl=10, show_spinner=False)
@@ -477,19 +510,23 @@ def main() -> None:
                 assumptions["evaluate_at_unseen_resolution"] = p3.checkbox("Evaluate at an unseen resolution")
             if problem["assumptions"]["add_symmetries"]:
                 st.caption(f"Added from your answers: {', '.join(problem['assumptions']['add_symmetries'])} symmetry.")
-        submitted = st.button("Get recommendations", type="primary", icon=":material/auto_awesome:")
+        submitted = st.button("Get recommendations", key="get_recommendations", type="primary",
+                              icon=":material/auto_awesome:")
         description = problem["description"]
         if submitted:
             try:
                 st.session_state["recommendations"] = bridge.get_recommendations(
                     description, representation, int(num_nodes), vram_gb, target_metric,
-                    dynamic_topology=problem["dynamic_topology"],
+                    dynamic_topology=problem["dynamic_topology"], required_output=problem["required_output"],
                 )
             except (ValueError, KeyError) as exc:
                 st.error(str(exc))
             else:
                 no_fit = st.session_state["recommendations"].get("verdict") == "no_fit"
-                st.session_state["problem_dataset"] = None if no_fit else dataset_for_problem(task, description)
+                st.session_state["problem"] = None if no_fit else {
+                    "task": task, "required_output": problem["required_output"], "num_nodes": int(num_nodes),
+                    "vram_gb": float(vram_gb), "assumptions": assumptions,
+                }
                 st.session_state["problem_context"] = (description, int(num_nodes), assumptions)
 
         result = st.session_state.get("recommendations")
@@ -502,6 +539,8 @@ def main() -> None:
                 if result.get("suggested_networks"):
                     st.caption("Add one of these as a new architecture (see `docs/adding_a_network.md`); "
                                "the advisor picks it up from the registry and catalog.yaml.")
+                if result.get("suggested_datasets"):
+                    st.markdown("**Datasets to add:** " + ", ".join(result["suggested_datasets"]))
             elif verdict == "weak_fit":
                 st.warning(result["reason"], icon=":material/report:")
             else:
@@ -554,6 +593,13 @@ def main() -> None:
                                  f"Plausible range {budget['plausible_range_hours'][0]}–{budget['plausible_range_hours'][1]} h. "
                                  + budget["assumptions"])
 
+                    evidence = row.get("evidence")
+                    if evidence and evidence.get("paper"):
+                        paper = evidence["paper"]
+                        reported = "; ".join(f"{r['dataset']} {r['metric']} {r['value']}" for r in evidence["reported"])
+                        st.caption(f":material/article: [{paper['title']}]({paper['url']}) ({paper['venue']})"
+                                   + (f". Paper reports: {reported}." if reported else ".")
+                                   + " Paper numbers, not reproduced here.")
                     why, risks = st.columns(2)
                     if row.get("rationale"):
                         why.markdown("**Why it fits**\n" + "\n".join(f"- {line}" for line in row["rationale"]))
@@ -569,6 +615,13 @@ def main() -> None:
                         else:
                             if dossier.get("doc_summary"):
                                 st.write(dossier["doc_summary"])
+                            if dossier.get("evidence"):
+                                ev = dossier["evidence"]
+                                st.markdown(f"**Paper**: [{ev['paper']['title']}]({ev['paper']['url']}) "
+                                            f"({ev['paper']['venue']}); checked {ev.get('checked', '')}")
+                                if ev.get("reported"):
+                                    st.dataframe(ev["reported"], hide_index=True, width="stretch")
+                                st.markdown(f"**This implementation vs the paper**: {ev.get('implementation_notes', '')}")
                             for title in ("merits", "demerits", "inductive_biases"):
                                 if dossier.get(title):
                                     st.markdown(f"**{title.replace('_', ' ').title()}**")
@@ -599,9 +652,11 @@ def main() -> None:
                                 st.caption(f"⚠ {warning}")
                     elif check:
                         middle.caption(f"Pre-flight unavailable: {check['failed']}")
-                    right.button("Use for training", key=f"use_{row['model']}", on_click=use_model, args=(row["model"],),
+                    benchmarks = (evidence or {}).get("benchmark_datasets", [])
+                    right.button("Use for training", key=f"use_{row['model']}", on_click=use_model,
+                                 args=(row["model"], benchmarks),
                                  icon=":material/play_arrow:", type="primary" if rank == 1 else "secondary",
-                                 width="stretch", disabled=verdict == "no_fit")
+                                 width="stretch", disabled=verdict == "no_fit" or not row.get("supports_output", True))
 
         with st.expander("Estimate VRAM", expanded=not result):
             c1, c2, c3, c4 = st.columns(4)
@@ -657,7 +712,19 @@ def main() -> None:
 
         elif mode == "Download a dataset":
             st.caption(f"Archives and converted datasets are cached in `{DATA_DIR}` (set `NEURAL3DBENCH_DATA` to move it).")
-            source = st.selectbox("Dataset", list(DOWNLOADS), format_func=DOWNLOADS.get)
+            wanted = (st.session_state.get("problem") or {}).get("required_output")
+            relevant = [d for d in DOWNLOADS if wanted is None or DOWNLOAD_OUTPUTS[d] == wanted]
+            if wanted and not relevant:
+                benchmarks = sorted({b for row in (st.session_state.get("recommendations") or {}).get("recommendations", [])
+                                     if row.get("supports_output") for b in (row.get("evidence") or {}).get("benchmark_datasets", [])})
+                st.info("No download here is labelled for your problem's output, so all are listed. Datasets to add: "
+                        + (", ".join(benchmarks) if benchmarks else "none recorded") + ".", icon=":material/info:")
+            elif wanted and not st.checkbox("Show all downloads", key="download_show_all",
+                                            help="Only downloads labelled for your problem's output are listed."):
+                pass
+            else:
+                relevant = list(DOWNLOADS)
+            source = st.selectbox("Dataset", relevant or list(DOWNLOADS), format_func=DOWNLOADS.get)
             c1, c2, c3 = st.columns(3)
             if source in MESH_DOWNLOADS:
                 c1.caption("Meshes are kept whole (no point sampling), decimated to at most 2048 faces. "
@@ -764,10 +831,18 @@ def main() -> None:
     with train_tab:
         status = trainer.get_status()
         running = status["status"] == "training"
+        problem = st.session_state.get("problem") or {}
         c1, c2, c3 = st.columns(3)
         c1.selectbox("Model", model_names, key="train_model", disabled=running)
-        c2.selectbox("Dataset", sorted(DATASETS), key="train_dataset", disabled=running,
-                     format_func=lambda d: f"{d} ({DATASETS[d].task.replace('_', ' ')})")
+        show_all = st.session_state.get("train_show_all", False)
+        fitting = cached_compatible(st.session_state["train_model"], problem.get("required_output"), len(DATASETS))
+        options = sorted(DATASETS) if show_all or not fitting else fitting
+        if st.session_state["train_dataset"] not in options:
+            st.session_state["train_dataset"] = options[0]
+        c2.selectbox("Dataset", options, key="train_dataset", disabled=running,
+                     format_func=lambda d: f"{d} ({DATASETS[d].task.replace('_', ' ')})",
+                     help="Only datasets this model can train on" + (" that give your problem's output"
+                          if problem.get("required_output") else "") + ". Tick 'Show all datasets' to override.")
         c3.text_input("Experiment name", key="train_experiment", disabled=running)
         c1.number_input("Epochs", min_value=1, max_value=10_000, key="train_epochs", disabled=running)
         c2.number_input("Learning rate", min_value=1e-7, max_value=1.0, format="%.1e", step=1e-4, key="train_lr", disabled=running)
@@ -776,6 +851,26 @@ def main() -> None:
         st.caption(f"**{chosen.task.replace('_', ' ')}**: {chosen.description}"
                    + (f" Classes: {', '.join(chosen.class_names)}." if chosen.class_names else "")
                    + " The model head (`output_dim`, `task`) is sized from the dataset; JSON overrides win.")
+        c2.checkbox("Show all datasets", key="train_show_all", disabled=running)
+        blocked = not fitting and not show_all
+        if not fitting:
+            st.warning(choose_dataset(st.session_state["train_model"], problem.get("required_output"),
+                                      problem.get("task", ""))[1]
+                       + " Training is disabled; tick *Show all datasets* to train on an unrelated dataset anyway.")
+        why = st.session_state.get("train_reasons")
+        if why and why["model"] == st.session_state["train_model"]:
+            with st.expander(f"Why this training setup for {why['model']}", expanded=True, icon=":material/lightbulb:"):
+                st.markdown(f"**Dataset**: {why['dataset_reason']}")
+                setup = why.get("setup")
+                if setup:
+                    paper = setup["paper"]
+                    if paper:
+                        st.markdown(f"**Recipe source**: [{paper['title']}]({paper['url']}) ({paper['venue']}), "
+                                    f"checked {setup['checked']}.")
+                    st.markdown("\n".join(f"- {r}" for r in setup["reasons"]))
+                    for w in setup["warnings"]:
+                        st.caption(f"⚠ {w}")
+                st.caption("Edits below override these suggestions.")
         mismatch = cached_input_mismatch(st.session_state["train_model"], chosen.name)
         if mismatch:
             st.warning(mismatch)
@@ -783,10 +878,6 @@ def main() -> None:
             st.warning(f"{st.session_state['train_samples']} samples for {chosen.num_classes} classes is too few to learn; "
                        f"raise Samples (Advanced) to {16 * chosen.num_classes} or more. For diffusionnet add "
                        '`{"input_features": "hks"}` to the config overrides (rotation invariant input).')
-        problem = st.session_state.get("problem_dataset")
-        if problem and DATASETS[problem].task != chosen.task:
-            st.warning(f"The advisor problem is {DATASETS[problem].task.replace('_', ' ')}, but `{chosen.name}` "
-                       f"trains {chosen.task.replace('_', ' ')}. Pick `{problem}` to train for your problem.")
         with st.expander("Advanced"):
             a1, a2, a3, a4 = st.columns(4)
             a1.selectbox("Optimizer", ("adam", "adamw", "sgd"), key="train_optimizer", disabled=running)
@@ -796,6 +887,14 @@ def main() -> None:
             if st.session_state["train_device"] not in devices:
                 st.session_state["train_device"] = "cpu"
             a4.selectbox("Device", devices, key="train_device", disabled=running)
+            a1.number_input("Momentum (SGD)", min_value=0.0, max_value=0.999, step=0.1, key="train_momentum",
+                            disabled=running)
+            a2.number_input("Weight decay", min_value=0.0, max_value=1.0, format="%.1e", step=1e-4,
+                            key="train_weight_decay", disabled=running)
+            a3.text_input("LR schedule", key="train_schedule", disabled=running,
+                          help="none, cosine:<eta_min>, step:<every epochs>:<gamma> or multistep:<e1>,<e2>:<gamma>.")
+            a4.checkbox("Random rotation augmentation", key="train_augment_rotation", disabled=running or chosen.mesh,
+                        help="Rotates each training sample by a random 3D rotation (point datasets).")
         gpu_problem = cuda_problem()
         if gpu_problem:
             st.warning(gpu_problem)
@@ -804,7 +903,8 @@ def main() -> None:
                          help='Passed to ModelRegistry.create, e.g. {"widths": [64, 64]}.')
 
         b1, b2, b3 = st.columns([1, 1, 2])
-        if b1.button("Start Training", type="primary", icon=":material/play_arrow:", disabled=running, width="stretch"):
+        if b1.button("Start Training", type="primary", icon=":material/play_arrow:", disabled=running or blocked,
+                     width="stretch"):
             try:
                 trainer.start_training(config_from_form(st.session_state))
             except (ValueError, KeyError, TypeError, RuntimeError) as exc:  # bad JSON/config or a run in progress

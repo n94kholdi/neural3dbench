@@ -49,7 +49,8 @@ python /abs/path/to/Neural3DBench/tools/mcp_advisor/server.py   # from anywhere
 | `get_model_dossier` | `model_name` | Paradigm, inductive biases, merits, demerits, tensor contract, complexity, default config, docs, references, examples |
 | `get_problem_questions` | `task` | Application domains and follow-up questions relevant to the task (choices and yes/no flags), e.g. label granularity for segmentation, time behaviour for simulation |
 | `compose_problem_description` | `task`, `answers=None`, `domains=None`, `extra=""` | `description` for `recommend_architecture`, `dynamic_topology`, and pre-flight assumptions (target kind, geometry variation, topology changes, extra symmetries) |
-| `recommend_architecture` | `problem_description`, `input_format`, `max_elements_per_sample`, `dynamic_topology=False`, `target_metric="accuracy"` | `verdict` (`fit`, `weak_fit`, `no_fit`); ranked models with score, matched tasks, rationale, pitfalls, estimated VRAM and hardware tier. On `no_fit`: `missing_capability`, `reason` and `suggested_networks` (name, why, paper) |
+| `recommend_architecture` | `problem_description`, `input_format`, `max_elements_per_sample`, `dynamic_topology=False`, `target_metric="accuracy"`, `required_output=None` | `verdict` (`fit`, `weak_fit` = fits only after converting the input, `no_fit`); ranked models with score, matched tasks, outputs, rationale, pitfalls, paper evidence (paper, reported results, benchmark datasets, implementation notes), estimated VRAM and hardware tier. On `no_fit`: `missing_capability`, `reason`, `suggested_networks` (name, why, paper), `suggested_datasets` and `convertible_alternatives` |
+| `recommend_training_setup` | `model_name`, `num_elements`, `vram_gb=8.0`, `required_symmetries=None`, `target_kind="scalar"`, `max_epochs=300` | Optimizer, learning rate, momentum, weight decay, LR schedule, epochs, batch, rotation augmentation and model config from the paper recipe, each with its reason; warnings for unstated settings and implementation differences |
 | `estimate_resource_footprint` | `model_name`, `num_elements`, `batch_size=1`, `precision="fp32"` | Training and inference memory, hardware tier, scaling when N doubles, assumptions |
 | `refresh_model_catalog` | none | Sync report: added/removed models, uncurated models, models without docs, import errors |
 | `audit_problem_assumptions` | `problem_description`, `model_name=None`, `boundary_conditions="none"`, `topology_changes=False`, `geometry_varies=False`, `evaluate_at_unseen_resolution=False` | Per-model findings (BC enforcement, topology, per-instance fitting, resolution transfer, FFT periodicity) and the models without errors |
@@ -111,6 +112,31 @@ Each model gets a score from these terms:
 | `0.5 * speed` or `0.5 * expressivity`, from `target_metric` | +0.5 to +2.5 |
 | Estimated training peak above 24 GB | -3, with a VRAM pitfall |
 | Estimated training peak of 8-24 GB | -1 |
+| `required_output` given and the model's heads cannot produce it | -4, and the model is listed after every model that can |
+
+The verdict follows the ranking. `fit`: a model gives the task and output on the native input.
+`weak_fit`: only after converting the input (`also_accepts`). `no_fit`: no registered model gives
+the task and output on this input. The answer then names networks and datasets to add
+(`GAP_SUGGESTIONS`, `MISSING_CAPABILITIES`) and the representations that would work after conversion.
+
+### Evidence: where the model facts come from
+
+Each catalog entry has an `outputs` list and an `evidence` block:
+
+| Field | Source | How it was checked |
+| --- | --- | --- |
+| `evidence.paper`, `reported`, `paper_recipe`, `benchmark_datasets` | The model's original paper | Read from the full text (ar5iv) on 2026-11-09; `checked` says when a fact came from the abstract only. `None` means the paper does not state it. |
+| `symmetries` | The implementation | Measured: permute, translate and rotate inputs and compare outputs (`tests/test_model_evidence.py`). |
+| `outputs` | The implementation | The heads the config actually builds (for example, MeshNet and MeshWalker classify shapes only). |
+| `evidence.implementation_notes` | Default config vs the paper | Where this repository differs: output sizes, missing variants, input limits. |
+
+Reported numbers are the paper's, on the paper's data and recipe. They are not reproduced by this
+repository; `get_benchmark_results` returns what was measured here.
+
+`recommend_training_setup` turns `paper_recipe` into dashboard settings. It keeps the paper's
+optimizer, learning rate, momentum, weight decay and schedule (`paper_recipe.scheduler`, scaled when
+epochs are capped). It caps the batch by the memory estimate and adds rotation augmentation, or
+DiffusionNet's `hks` input, when rotation invariance is required. Each setting comes with its reason.
 
 ## Register with Claude Desktop
 

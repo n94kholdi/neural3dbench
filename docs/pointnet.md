@@ -121,3 +121,15 @@ does not explicitly model local mesh connectivity or neighborhood message
 passing like GCN, GAT, or MeshGraphNet. That simplicity provides permutation
 invariance, but can miss fine local structure that neighborhood-aware models
 such as PointNet++ are designed to capture.
+
+## Paper results and recipe
+
+ModelNet40 89.2% overall accuracy (1024 points), ShapeNetPart 83.7% mIoU, S3DIS 47.71% mIoU.
+Training: Adam, learning rate 0.001 halved every 20 epochs, batch 32; augmentation by rotation
+about the up axis and Gaussian jitter (std 0.02); dropout keep 0.7 on the last FC layer; a 0.001
+feature-transform regulariser on top of cross-entropy.
+
+## References
+
+- [PointNet: Deep Learning on Point Sets for 3D Classification and Segmentation (arXiv 1612.00593)](https://arxiv.org/abs/1612.00593)
+- [Official implementation](https://github.com/charlesq34/pointnet)

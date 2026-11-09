@@ -63,12 +63,15 @@ def recommend_architecture(
     max_elements_per_sample: int,
     dynamic_topology: bool = False,
     target_metric: str = "accuracy",
+    required_output: str | None = None,
 ) -> dict:
-    """Rank architectures for a problem with rationale and pitfalls.
+    """Rank architectures for a problem with rationale, pitfalls and paper evidence.
 
     input_format: point_cloud | mesh_graph | voxel_grid | continuous_coords
     max_elements_per_sample: points, nodes or voxels per sample.
     target_metric: accuracy | speed
+    required_output: shape_label | point_label | point_field | point_set | boxes | rigid_pose | deformation_field
+                     (compose_problem_description returns it); models whose heads cannot give it rank last.
     Returns ``verdict``: fit | weak_fit | no_fit. On no_fit, ``missing_capability``, ``reason`` and
     ``suggested_networks`` name what to add; the ranked list is then only the closest registered models.
     """
@@ -78,6 +81,7 @@ def recommend_architecture(
         max_elements_per_sample,
         dynamic_topology=dynamic_topology,
         target_metric=target_metric,
+        required_output=required_output,
     )
 
 
@@ -197,6 +201,23 @@ def generate_benchmark_config(
     """YAML config and Python launcher (ModelRegistry.create) with batch, precision and optimizer filled in."""
     return guardrails.generate_benchmark_config(
         advisor, model_name, dataset_name, num_elements, hardware_target, dataset_size, epochs
+    )
+
+
+@server.tool()
+def recommend_training_setup(
+    model_name: str,
+    num_elements: int,
+    vram_gb: float = 8.0,
+    required_symmetries: list[str] | None = None,
+    target_kind: str = "scalar",
+    max_epochs: int = 300,
+) -> dict:
+    """Optimizer, learning rate, LR schedule, epochs, batch, augmentation and model config from the model's
+    paper recipe (cited), adapted to the problem's VRAM and required symmetries. Returns the setup, a reason
+    per setting, and warnings for what the paper does not state or the implementation does differently."""
+    return guardrails.recommend_training_setup(
+        advisor, model_name, num_elements, vram_gb, required_symmetries, target_kind, max_epochs
     )
 
 

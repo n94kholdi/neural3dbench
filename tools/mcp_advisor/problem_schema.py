@@ -132,9 +132,9 @@ QUESTIONS: dict[str, list[dict[str, Any]]] = {
     ],
     "segmentation_classification": [
         _choice("granularity", "What is labelled", {
-            "One label per object / shape": "classification",
-            "Part label per point (object parts)": "segmentation part",
-            "Semantic label per point (whole scene)": "segmentation dense",
+            "One label per object / shape": ("classification", {"required_output": "shape_label"}),
+            "Part label per point (object parts)": ("segmentation part", {"required_output": "point_label"}),
+            "Semantic label per point (whole scene)": ("segmentation dense", {"required_output": "point_label"}),
             "Separate id per object instance": "instance",
         }, "Instance ids are not covered by any registered model yet; the advisor says so."),
         _choice("scale", "Scene scale", {
@@ -180,8 +180,8 @@ QUESTIONS: dict[str, list[dict[str, Any]]] = {
     ],
     "registration": [
         _choice("transform", "Transformation", {
-            "Rigid (rotation + translation)": "rigid",
-            "Non-rigid / deformable": "deformation",
+            "Rigid (rotation + translation)": ("rigid", {"required_output": "rigid_pose"}),
+            "Non-rigid / deformable": ("", {"required_output": "deformation_field"}),
         }),
         _choice("overlap", "Overlap between the two clouds", {"Full": "", "Partial": "partial"}),
         _choice("init", "Initial alignment", {
@@ -191,6 +191,18 @@ QUESTIONS: dict[str, list[dict[str, Any]]] = {
         _choice("data", "Data", {"Object scans": "scan", "LiDAR sweeps / maps": "scan matching lidar outdoor"}),
         _flag("noisy", "Noisy or outlier-heavy", "robust"),
     ],
+}
+
+
+# What each task predicts unless an answer says otherwise (advisor.OUTPUTS).
+TASK_OUTPUTS = {
+    "surrogate_simulation": "point_field",
+    "pde_operator": "point_field",
+    "field_fitting": "point_field",
+    "segmentation_classification": "shape_label",
+    "shape_completion": "point_set",
+    "object_detection": "boxes",
+    "registration": "rigid_pose",
 }
 
 
@@ -210,8 +222,8 @@ def compose_problem(
     """Turn answers into a ``recommend_architecture`` description and pre-flight assumptions.
 
     answers: question key -> option label (choice) or bool (flag). Missing choices use the first option.
-    Returns description, assumptions (target_kind, geometry_varies, topology_changes,
-    evaluate_at_unseen_resolution, add_symmetries) and dynamic_topology.
+    Returns description, required_output (for recommend_architecture), assumptions (target_kind,
+    geometry_varies, topology_changes, evaluate_at_unseen_resolution, add_symmetries) and dynamic_topology.
     """
     answers = answers or {}
     unknown_domains = [d for d in domains or [] if d not in DOMAINS]
@@ -220,11 +232,14 @@ def compose_problem(
     words = [task.replace("_", " ")] + [DOMAINS[d] for d in domains or []]
     assumptions: dict[str, Any] = {"target_kind": "scalar", "geometry_varies": False, "topology_changes": False,
                                    "evaluate_at_unseen_resolution": False, "add_symmetries": []}
+    output = {"required_output": TASK_OUTPUTS.get(task)}
 
     def apply(keywords: str, sets: dict[str, Any]) -> None:
         words.append(keywords)
         for key, value in sets.items():
-            if key == "add_symmetries":
+            if key == "required_output":
+                output[key] = value
+            elif key == "add_symmetries":
                 assumptions[key] += [s for s in value if s not in assumptions[key]]
             else:
                 assumptions[key] = value
@@ -247,6 +262,7 @@ def compose_problem(
     words.append(extra.strip())
     return {
         "description": " ".join(w for w in words if w),
+        "required_output": output["required_output"],
         "assumptions": assumptions,
         "dynamic_topology": assumptions["topology_changes"],
     }

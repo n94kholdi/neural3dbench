@@ -144,3 +144,10 @@ precision relative to point- or mesh-based networks. PointNet/PointNet++ remain
 appropriate for point clouds, while GCN/GAT/MeshGraphNet preserve graph or mesh
 connectivity. This module intentionally contains no PDE, PINN, or task-specific
 loss so it can be reused for supervised, surrogate, and physics-guided work.
+
+## References
+
+- [3D U-Net: Learning Dense Volumetric Segmentation from Sparse Annotation (arXiv 1606.06650)](https://arxiv.org/abs/1606.06650):
+  Xenopus kidney IoU 0.863 (semi-automated) and 0.704 (fully automated); SGD, batch 1, 70k
+  iterations, elastic-deformation augmentation and a weighted cross-entropy that ignores
+  unlabelled voxels.

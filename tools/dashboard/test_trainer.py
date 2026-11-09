@@ -159,3 +159,40 @@ def test_mesh_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, model_name: s
     assert status["status"] == "completed", status["error"]
     run = mlflow.MlflowClient().get_run(status["run_id"])
     assert "val_accuracy" in run.data.metrics
+
+
+def test_lr_schedule_and_rotation_helpers() -> None:
+    from tools.dashboard.trainer import make_scheduler, parse_lr_schedule, random_rotations
+
+    assert parse_lr_schedule("multistep:75,150:0.1") == ("multistep", [75, 150, 0.1])
+    for bad in ("step:0:0.5", "cosine:a", "linear"):
+        with pytest.raises(ValueError):
+            parse_lr_schedule(bad)
+    optimizer = torch.optim.SGD([torch.zeros(1, requires_grad=True)], lr=1.0)
+    scheduler = make_scheduler(optimizer, "step:2:0.5", 10)
+    for _ in range(4):
+        optimizer.step()
+        scheduler.step()
+    assert optimizer.param_groups[0]["lr"] == pytest.approx(0.25)
+    r = random_rotations(16, torch.device("cpu"))
+    assert torch.allclose(r @ r.transpose(1, 2), torch.eye(3).expand(16, 3, 3), atol=1e-5)
+    assert torch.allclose(torch.det(r), torch.ones(16), atol=1e-5)
+    with pytest.raises(ValueError, match="point datasets"):
+        TrainingConfig(dataset="shrec11", augment_rotation=True)
+
+
+@pytest.mark.parametrize("dataset", ["primitive_shapes", "partial_shapes"])
+def test_paper_style_run_with_schedule_and_rotation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, dataset: str) -> None:
+    monkeypatch.chdir(tmp_path)
+    trainer = Trainer()
+    trainer.start_training({
+        "model_name": "pointnet" if dataset == "primitive_shapes" else "pcn", "dataset": dataset, "epochs": 2,
+        "batch_size": 4, "num_samples": 12, "num_points": 64, "optimizer": "sgd", "learning_rate": 0.1,
+        "momentum": 0.9, "weight_decay": 1e-4, "lr_schedule": "cosine:0.001", "augment_rotation": True,
+        "experiment_name": "test-paper-recipe",
+    })
+    status = trainer.wait(timeout=120)
+    assert status["status"] == "completed", status["error"]
+    client = mlflow.tracking.MlflowClient(tracking_uri=(tmp_path / "mlruns").as_uri())
+    params = client.get_run(status["run_id"]).data.params
+    assert params["lr_schedule"] == "cosine:0.001" and params["augment_rotation"] == "True"

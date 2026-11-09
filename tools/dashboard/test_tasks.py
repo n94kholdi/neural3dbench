@@ -31,12 +31,16 @@ def test_primitive_shapes_labels() -> None:
     assert coords.shape == (6, 64, 3) and labels.tolist() == [0, 1, 2, 0, 1, 2]
 
 
-def test_dataset_for_problem() -> None:
-    query = "3D object semantic part segmentation on unordered point clouds to predict point-wise labels"
-    assert tasks.dataset_for_problem("segmentation_classification", query) == "chair_parts"
-    assert tasks.dataset_for_problem("segmentation_classification", "shape classification") == "primitive_shapes"
-    assert tasks.dataset_for_problem("pde_operator") == "poisson"
-    assert tasks.dataset_for_problem("field_fitting") == "deformed_sphere"
+def test_choose_dataset_follows_output_and_model() -> None:
+    assert tasks.choose_dataset("pointnet", "point_label")[0] == "chair_parts"
+    assert tasks.choose_dataset("pointnet", "shape_label")[0] == "primitive_shapes"
+    assert tasks.choose_dataset("transolver", "point_field", "pde_operator")[0] == "poisson"
+    assert tasks.choose_dataset("siren", "point_field", "field_fitting")[0] == "deformed_sphere"
+    name, reason = tasks.choose_dataset("dgcnn", "shape_label", benchmarks=["ModelNet40"])
+    assert name == "primitive_shapes" and "synthetic stand-in" in reason and "modelnet40" in reason
+    # Mesh models only get mesh datasets; classification-only mesh models get nothing per point.
+    assert set(tasks.compatible_datasets("meshnet", "shape_label")) == {"modelnet10_mesh", "shrec11"}
+    assert tasks.compatible_datasets("meshnet", "point_label") == []
 
 
 @pytest.mark.parametrize("model_name", ["pointnet", "pointnet2", "dgcnn", "pointnext", "mlp"])
@@ -97,9 +101,10 @@ def test_partial_shapes_and_chamfer() -> None:
     pred = torch.zeros(4, 10, 3, requires_grad=True)
     tasks.chamfer_distance(pred, full).backward()
     assert torch.isfinite(pred.grad).all()
-    assert tasks.dataset_for_problem("shape_completion") == "partial_shapes"
-    assert tasks.dataset_for_problem("object_detection") is None
-    assert tasks.dataset_for_problem("registration") is None
+    assert tasks.choose_dataset("pcn", "point_set")[0] == "partial_shapes"
+    assert tasks.choose_dataset("pointpillars", "boxes", benchmarks=["KITTI"]) [0] is None
+    assert "KITTI" in tasks.choose_dataset("pointpillars", "boxes", benchmarks=["KITTI"])[1]
+    assert tasks.choose_dataset("dcp", "rigid_pose")[0] is None
 
 
 def test_completion_mismatch() -> None:

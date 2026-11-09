@@ -414,21 +414,58 @@ def model_input(data: torch.Tensor | list, index: Any) -> torch.Tensor | ModelIn
 # ---------------------------------------------------------------- advisor -> training contract
 
 
-def dataset_for_problem(advisor_task: str, description: str = "") -> str | None:
-    """Pick the synthetic dataset that matches an advisor task domain and free-text description.
+# Advisor output (tools/mcp_advisor/advisor.OUTPUTS) -> the dashboard task that trains it. Boxes, poses and
+# deformation fields have no dashboard dataset or loss.
+OUTPUT_TASKS = {
+    "shape_label": SHAPE_CLASSIFICATION,
+    "point_label": PART_SEGMENTATION,
+    "point_field": FIELD_REGRESSION,
+    "point_set": SHAPE_COMPLETION,
+}
+# Paper benchmark (normalized name) -> Data tab download key, for benchmarks the dashboard can fetch.
+BENCHMARK_DOWNLOADS = {"modelnet10": "modelnet10", "modelnet40": "modelnet40", "shapenetpart": "shapenet_part",
+                       "shrec11": "shrec11"}
 
-    None for object detection and registration: no dashboard dataset has box labels or pose pairs.
+
+def _norm(name: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", name.lower())
+
+
+def compatible_datasets(model_name: str, required_output: str | None = None) -> list[str]:
+    """Datasets ``model_name`` can train on that also give ``required_output`` (any output when None)."""
+    wanted = OUTPUT_TASKS.get(required_output) if required_output else None
+    if required_output and wanted is None:
+        return []
+    return [name for name, d in DATASETS.items()
+            if (wanted is None or d.task == wanted) and input_mismatch(model_name, name) is None]
+
+
+def choose_dataset(
+    model_name: str, required_output: str | None, advisor_task: str = "", benchmarks: list[str] | tuple = ()
+) -> tuple[str | None, str]:
+    """Dataset for a recommended model and the reason, preferring a downloaded paper benchmark.
+
+    ``benchmarks``: the model's paper benchmark datasets (catalog evidence). Returns ``(None, reason)``
+    with what to add when no dashboard dataset fits.
     """
-    text = description.lower()
-    if advisor_task in ("object_detection", "registration"):
-        return None
-    if advisor_task == "shape_completion":
-        return "partial_shapes"
-    if advisor_task == "segmentation_classification":
-        if "classif" in text and "segment" not in text:
-            return "primitive_shapes"
-        return "chair_parts"
-    return "poisson" if advisor_task == "pde_operator" else "deformed_sphere"
+    candidates = compatible_datasets(model_name, required_output)
+    downloadable = sorted({BENCHMARK_DOWNLOADS[_norm(b)] for b in benchmarks if _norm(b) in BENCHMARK_DOWNLOADS})
+    paper = ", ".join(benchmarks) or "not recorded"
+    if not candidates:
+        return None, (f"No dashboard dataset fits `{model_name}` for this output. Add one of its paper benchmarks "
+                      f"({paper}) as a dataset with a matching loss.")
+    for name in candidates:
+        if any(_norm(name).startswith(_norm(b)) for b in benchmarks if _norm(b)):
+            return name, f"`{name}` is one of the paper's benchmarks ({paper}) and is already downloaded."
+    preferred = "poisson" if advisor_task == "pde_operator" else "deformed_sphere"
+    name = preferred if preferred in candidates else next((c for c in candidates if c in BUILTIN_DATASETS), candidates[0])
+    reason = f"`{name}` matches the required output and `{model_name}`'s input"
+    if name in BUILTIN_DATASETS and not DATASETS[name].mesh:
+        reason += "; it is a small synthetic stand-in, not a paper benchmark"
+    reason += f". Paper benchmarks: {paper}."
+    if downloadable:
+        reason += f" Download {', '.join(downloadable)} in the Data tab to train on a real one."
+    return name, reason
 
 
 # ---------------------------------------------------------------- model head, loss, metrics

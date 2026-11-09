@@ -26,8 +26,12 @@ MLflow 3 defaults `mlflow ui` to a SQLite store and rejects the file store unles
 
 1. **Problem & Advisor**: task, representation, points per sample and GPU memory give ranked
    recommendations (`AdvisorBridge.get_recommendations`). Each card opens the model dossier;
-   *Use for training* preselects the model in tab 3 and the dataset that matches the problem
-   (`tasks.dataset_for_problem`, e.g. part segmentation selects `chair_parts`).
+   The questions under *Describe the problem* change with the task and set the output the model
+   must give (`required_output`). Each card cites the model's paper and its reported results.
+   *Use for training* fills tab 3 from the paper's recipe (`AdvisorBridge.training_setup`): optimizer,
+   learning rate, schedule, epochs, batch capped by GPU memory, rotation augmentation when rotations
+   are arbitrary. It also picks a dataset that gives the required output (`tasks.choose_dataset`,
+   preferring a downloaded paper benchmark). Tab 3 explains every choice under *Why this training setup*.
    When no registered model can do the task (instance segmentation,
    generation, scene flow), the advisor returns `verdict: "no_fit"`. The tab then shows
    *Not supported yet*, what the task needs and networks to add (with papers), and disables *Use for training*. *Estimate VRAM* gives the memory heuristic for any model.
@@ -49,7 +53,10 @@ MLflow 3 defaults `mlflow ui` to a SQLite store and rejects the file store unles
    Everything is cached in `~/.cache/neural3dbench` (`NEURAL3DBENCH_DATA` overrides it) and
    registered again on start.
 3. **Training**: pick a registered model and hyperparameters, then start or stop a background run.
-   Loss curves and epoch progress refresh every 2 seconds. Each synthetic dataset names its task,
+   The dataset list only shows datasets the model can train on that give the problem's output
+   (*Show all datasets* overrides). *Advanced* adds SGD momentum, weight decay, an LR schedule
+   (`none`, `cosine:<eta_min>`, `step:<every>:<gamma>`, `multistep:<e1>,<e2>:<gamma>`) and random
+   rotation augmentation. Loss curves and epoch progress refresh every 2 seconds. Each synthetic dataset names its task,
    and the task sizes the model head (`output_dim`, `task`) and picks the loss and metrics:
 
    | dataset | task | target | loss | metrics |

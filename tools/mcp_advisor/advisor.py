@@ -79,13 +79,16 @@ MISSING_CAPABILITIES = {
     "instance_segmentation": {
         "keywords": ("instance",),
         "needs": "A separate id per object instance, not only per class: offset/embedding head and clustering.",
+        "suggested_datasets": ["ScanNet (instance labels)", "S3DIS"],
         "suggested_networks": [
             {"name": "PointGroup", "why": "Semantic + center-offset branches, clustered into instances.", "reference": "https://arxiv.org/abs/2004.01658"},
         ],
     },
     "shape_generation": {
-        "keywords": ("generat", "synthes", "diffusion", "sample new shape"),
+        # "diffusion model", not "diffusion": heat diffusion and DiffusionNet are not generation.
+        "keywords": ("generat", "synthes", "diffusion model", "sample new shape"),
         "needs": "A generative model over point sets (flow, diffusion or GAN), trained without per-point targets.",
+        "suggested_datasets": ["ShapeNet"],
         "suggested_networks": [
             {"name": "PointFlow", "why": "Continuous normalizing flow over shapes and points.", "reference": "https://arxiv.org/abs/1906.12320"},
             {"name": "LION", "why": "Latent point diffusion; current quality baseline.", "reference": "https://arxiv.org/abs/2210.06978"},
@@ -94,9 +97,45 @@ MISSING_CAPABILITIES = {
     "scene_flow": {
         "keywords": ("scene flow", "motion estimat", "optical flow"),
         "needs": "Two frames in, a 3D motion vector per point of frame 1 out: a cross-frame correlation layer.",
+        "suggested_datasets": ["FlyingThings3D", "KITTI scene flow"],
         "suggested_networks": [
             {"name": "FlowNet3D", "why": "PointNet++ with a flow-embedding layer between frames.", "reference": "https://arxiv.org/abs/1806.01411"},
         ],
+    },
+}
+
+# What a model's heads predict (catalog ``outputs``); problem_schema answers set ``required_output``.
+OUTPUTS = {
+    "shape_label": "one class per shape",
+    "point_label": "a class per point / vertex / voxel",
+    "point_field": "a continuous field per point (regression)",
+    "point_set": "a new point set (completion / reconstruction)",
+    "boxes": "3D bounding boxes",
+    "rigid_pose": "a rigid transform between two clouds",
+    "deformation_field": "a non-rigid displacement per point between two clouds",
+}
+# Networks and datasets to add when no registered model gives the required output for a task.
+# Keyed by (task, output) or (task, output, representation); checked against the papers on 2026-11-09.
+GAP_SUGGESTIONS: dict[tuple[str, ...], dict[str, list]] = {
+    ("registration", "deformation_field"): {
+        "networks": [{"name": "Neural Deformation Pyramid (NDP)", "why": "Hierarchical MLP motion field for non-rigid point cloud registration (NeurIPS 2022).", "reference": "https://arxiv.org/abs/2205.12796"}],
+        "datasets": ["4DMatch / 4DLoMatch"],
+    },
+    ("pde_operator", "point_field", "continuous_coords"): {
+        "networks": [{"name": "DeepONet", "why": "Branch net for the input function, trunk net for query coordinates (Nature Machine Intelligence 2021).", "reference": "https://arxiv.org/abs/1910.03193"}],
+        "datasets": ["Darcy flow", "Burgers"],
+    },
+    ("shape_completion", "point_set", "voxel_grid"): {
+        "networks": [{"name": "3D-EPN", "why": "Volumetric encoder-predictor CNN for shape completion (CVPR 2017).", "reference": "https://arxiv.org/abs/1612.00101"}],
+        "datasets": ["ShapeNet (3D-EPN partial scans)"],
+    },
+    ("object_detection", "boxes", "voxel_grid"): {
+        "networks": [{"name": "VoxelNet", "why": "Voxel feature encoding + 3D convolutions + region proposal network (CVPR 2018).", "reference": "https://arxiv.org/abs/1711.06396"}],
+        "datasets": ["KITTI"],
+    },
+    ("segmentation_classification", "shape_label", "voxel_grid"): {
+        "networks": [{"name": "3D ShapeNets", "why": "Volumetric CNN shape classifier (CVPR 2015).", "reference": "https://arxiv.org/abs/1406.5670"}],
+        "datasets": ["ModelNet40 (voxelized)"],
     },
 }
 
@@ -406,6 +445,8 @@ class Advisor:
             "demerits": meta["demerits"],
             "complexity": meta["complexity"],
             "dynamic_topology": meta["dynamic_topology"],
+            "outputs": meta.get("outputs"),
+            "evidence": meta.get("evidence"),
             "tensor_contract": {
                 "required_inputs": info.get("required_inputs", []),
                 "optional_inputs": info.get("supported_inputs", []),
@@ -503,10 +544,13 @@ class Advisor:
         dynamic_topology: bool = False,
         target_metric: str = "accuracy",
         top_k: int = 5,
+        required_output: str | None = None,
     ) -> dict[str, Any]:
         input_rep = normalize_representation(input_format)
         if target_metric not in ("accuracy", "speed"):
             raise ValueError("target_metric must be 'accuracy' or 'speed'.")
+        if required_output is not None and required_output not in OUTPUTS:
+            raise ValueError(f"required_output must be one of {sorted(OUTPUTS)}.")
         text = problem_description.lower()
         inferred_tasks = [task for task, words in _TASK_KEYWORDS.items() if any(w in text for w in words)]
 
@@ -531,6 +575,13 @@ class Advisor:
             elif inferred_tasks:
                 score -= 1
                 pitfalls.append(f"Not designed for {', '.join(inferred_tasks)}.")
+
+            outputs = meta.get("outputs")
+            supports_output = required_output is None or outputs is None or required_output in outputs
+            if not supports_output:
+                score -= 4
+                pitfalls.insert(0, f"Cannot predict {OUTPUTS[required_output]}: its heads give "
+                                   f"{', '.join(OUTPUTS.get(o, o) for o in outputs)}.")
 
             hits = [kw for kw in meta.get("keywords", []) if kw in text]
             if hits:
@@ -578,21 +629,31 @@ class Advisor:
                 "rationale": rationale,
                 "pitfalls": pitfalls,
                 "examples": model["examples"][:3],
+                "native_input": input_rep in meta["representations"],
+                "outputs": outputs,
+                "supports_output": supports_output,
+                "evidence": _evidence_summary(meta.get("evidence")),
             })
 
-        ranked.sort(key=lambda row: row["score"], reverse=True)
+        # Models that give the task and output come first; score orders each group.
+        ranked.sort(key=lambda row: (row["supports_output"] and (not inferred_tasks or bool(row["matched_tasks"])),
+                                     row["score"]), reverse=True)
         return {
             "input_format": input_rep,
             "inferred_tasks": inferred_tasks,
             "target_metric": target_metric,
-            **self._verdict(text, inferred_tasks, input_rep, ranked),
+            "required_output": required_output,
+            **self._verdict(text, inferred_tasks, input_rep, ranked, required_output),
             "recommendations": ranked[:top_k],
             "considered": len(ranked),
             "note": "Heuristic ranking from catalog.yaml metadata; benchmark the top candidates on your data.",
         }
 
-    def _verdict(self, text: str, inferred_tasks: list[str], input_rep: str, ranked: list[dict]) -> dict[str, Any]:
-        """``fit``, ``weak_fit`` (no model matches the inferred task) or ``no_fit`` (capability missing)."""
+    def _verdict(
+        self, text: str, inferred_tasks: list[str], input_rep: str, ranked: list[dict], required_output: str | None = None
+    ) -> dict[str, Any]:
+        """``fit``; ``weak_fit`` (fitting models need a representation conversion); ``no_fit`` (no registered
+        model gives the task and output on any usable input), with the networks and datasets to add."""
         covered = {task for model in self.state["models"].values() for task in model["metadata"]["tasks"]}
         for capability, info in MISSING_CAPABILITIES.items():
             if capability not in covered and any(word in text for word in info["keywords"]):
@@ -601,15 +662,52 @@ class Advisor:
                     "missing_capability": capability,
                     "reason": f"No registered model does {capability.replace('_', ' ')}. {info['needs']}",
                     "suggested_networks": info["suggested_networks"],
+                    "suggested_datasets": info.get("suggested_datasets", []),
                 }
         if not ranked:
             return {"verdict": "no_fit", "missing_capability": f"{input_rep} input",
                     "reason": f"No registered model accepts {input_rep} input, natively or after conversion.",
-                    "suggested_networks": []}
-        if inferred_tasks and not ranked[0]["matched_tasks"]:
+                    "suggested_networks": [], "suggested_datasets": []}
+        usable = [r for r in ranked if r["supports_output"] and (not inferred_tasks or r["matched_tasks"])]
+        if not usable:
+            need = " / ".join(t.replace("_", " ") for t in inferred_tasks) or "this problem"
+            if required_output:
+                need += f" with {OUTPUTS[required_output]}"
+            gap: dict[str, list] = {}
+            for task in inferred_tasks:
+                gap = (GAP_SUGGESTIONS.get((task, required_output, input_rep))
+                       or GAP_SUGGESTIONS.get((task, required_output)) or gap)
+            elsewhere = sorted({
+                f"{rep} ({name})"
+                for name, model in self.state["models"].items()
+                for rep in model["metadata"]["representations"]
+                if rep != input_rep
+                and (not inferred_tasks or set(inferred_tasks) & set(model["metadata"]["tasks"]))
+                and (required_output is None or required_output in (model["metadata"].get("outputs") or []))
+            })
+            reason = f"No registered model does {need} on {input_rep} input."
+            if elsewhere:
+                reason += " Converting the data would allow: " + ", ".join(elsewhere[:6]) + "."
+            return {"verdict": "no_fit", "missing_capability": f"{need} on {input_rep}", "reason": reason,
+                    "suggested_networks": gap.get("networks", []), "suggested_datasets": gap.get("datasets", []),
+                    "convertible_alternatives": elsewhere}
+        if not any(r["native_input"] for r in usable):
             return {"verdict": "weak_fit",
-                    "reason": f"No {input_rep} model is designed for {', '.join(inferred_tasks)}; the ranking is by input only."}
+                    "reason": f"Models fit only after converting {input_rep} input; see each model's rationale."}
         return {"verdict": "fit"}
+
+
+def _evidence_summary(evidence: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Paper, top reported results and implementation notes for a ranked row (full record in the dossier)."""
+    if not evidence:
+        return None
+    return {
+        "paper": evidence.get("paper"),
+        "reported": (evidence.get("reported") or [])[:3],
+        "benchmark_datasets": evidence.get("benchmark_datasets", []),
+        "implementation_notes": evidence.get("implementation_notes", ""),
+        "checked": evidence.get("checked", ""),
+    }
 
 
 def hardware_tier(gigabytes: float) -> str:

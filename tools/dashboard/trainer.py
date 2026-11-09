@@ -50,6 +50,10 @@ class TrainingConfig:
     batch_size: int = 8
     learning_rate: float = 1e-3
     optimizer: str = "adam"
+    momentum: float = 0.0  # SGD only
+    weight_decay: float = 0.0
+    lr_schedule: str = "none"  # none | cosine:<eta_min> | step:<every>:<gamma> | multistep:<e1>,<e2>:<gamma>
+    augment_rotation: bool = False  # random SO(3) rotation of each training sample (point datasets)
     num_samples: int = 64
     num_points: int = 512
     val_fraction: float = 0.25
@@ -71,6 +75,49 @@ class TrainingConfig:
             raise ValueError("val_fraction must be in (0, 1).")
         if self.learning_rate <= 0:
             raise ValueError("learning_rate must be positive.")
+        if self.momentum < 0 or self.weight_decay < 0:
+            raise ValueError("momentum and weight_decay must be non-negative.")
+        parse_lr_schedule(self.lr_schedule)
+        if self.augment_rotation and tasks.DATASETS[self.dataset].mesh:
+            raise ValueError("rotation augmentation supports point datasets only.")
+
+
+def parse_lr_schedule(spec: str) -> tuple[str, list[float]]:
+    """``none`` | ``cosine[:eta_min]`` | ``step:<every>:<gamma>`` | ``multistep:<e1>,<e2>,...:<gamma>``."""
+    kind, *args = (spec or "none").strip().lower().split(":")
+    try:
+        if kind == "none" and not args:
+            return kind, []
+        if kind == "cosine" and len(args) <= 1:
+            return kind, [float(args[0]) if args else 0.0]
+        if kind == "step" and len(args) == 2 and int(args[0]) > 0:
+            return kind, [int(args[0]), float(args[1])]
+        if kind == "multistep" and len(args) == 2:
+            return kind, [*(int(m) for m in args[0].split(",")), float(args[1])]
+    except ValueError:
+        pass
+    raise ValueError(f"lr_schedule {spec!r} must be none, cosine:<eta_min>, step:<every>:<gamma> "
+                     "or multistep:<e1>,<e2>:<gamma>.")
+
+
+def make_scheduler(optimizer: torch.optim.Optimizer, spec: str, epochs: int):
+    """Per-epoch LR scheduler for ``spec`` (see ``parse_lr_schedule``), or None."""
+    kind, args = parse_lr_schedule(spec)
+    if kind == "cosine":
+        return torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs, eta_min=args[0])
+    if kind == "step":
+        return torch.optim.lr_scheduler.StepLR(optimizer, step_size=args[0], gamma=args[1])
+    if kind == "multistep":
+        return torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=args[:-1], gamma=args[-1])
+    return None
+
+
+def random_rotations(count: int, device: torch.device) -> torch.Tensor:
+    """``count`` uniform random rotation matrices ``[count, 3, 3]`` (QR of Gaussian matrices)."""
+    q, r = torch.linalg.qr(torch.randn(count, 3, 3, device=device))
+    q = q * torch.sign(torch.diagonal(r, dim1=-2, dim2=-1)).unsqueeze(-2)
+    q[torch.det(q) < 0, :, 0] *= -1  # proper rotations only
+    return q
 
 
 def make_synthetic_dataset(config: TrainingConfig) -> tuple[torch.Tensor | list, torch.Tensor]:
@@ -129,7 +176,10 @@ class TrainingWorker(threading.Thread):
             train_x, val_x = coords[n_val:].to(device), coords[:n_val].to(device)
         train_y, val_y = target[n_val:].to(device), target[:n_val].to(device)
         val_input = tasks.model_input(val_x, range(len(val_x)))
-        optimizer = _OPTIMIZERS[cfg.optimizer.lower()](model.parameters(), lr=cfg.learning_rate)
+        extra = {"momentum": cfg.momentum} if cfg.optimizer.lower() == "sgd" else {}
+        optimizer = _OPTIMIZERS[cfg.optimizer.lower()](model.parameters(), lr=cfg.learning_rate,
+                                                       weight_decay=cfg.weight_decay, **extra)
+        scheduler = make_scheduler(optimizer, cfg.lr_schedule, cfg.epochs)
 
         mlflow.set_tracking_uri(_resolve_tracking_uri(cfg.tracking_uri))
         mlflow.set_experiment(cfg.experiment_name)
@@ -153,12 +203,20 @@ class TrainingWorker(threading.Thread):
                     if len(index) == 1 and start:  # BatchNorm cannot train on one sample; drop a 1-sample tail
                         continue
                     optimizer.zero_grad()
-                    loss = tasks.loss(task, tasks.forward(task, model, tasks.model_input(train_x, index)), train_y[index])
+                    batch_x, batch_y = tasks.model_input(train_x, index), train_y[index]
+                    if cfg.augment_rotation:
+                        rotation = random_rotations(len(index), device)
+                        batch_x = batch_x @ rotation
+                        if task == tasks.SHAPE_COMPLETION:  # the complete cloud turns with the partial one
+                            batch_y = batch_y @ rotation
+                    loss = tasks.loss(task, tasks.forward(task, model, batch_x), batch_y)
                     loss.backward()
                     optimizer.step()
                     total += loss.item() * len(index)
                     seen += len(index)
                 train_loss = total / seen
+                if scheduler is not None:
+                    scheduler.step()
 
                 model.eval()
                 with torch.no_grad():
