@@ -47,6 +47,8 @@ python /abs/path/to/Neural3DBench/tools/mcp_advisor/server.py   # from anywhere
 | --- | --- | --- |
 | `list_supported_models` | `representation=None`, `task=None` | Models with status, representations, tasks, complexity |
 | `get_model_dossier` | `model_name` | Paradigm, inductive biases, merits, demerits, tensor contract, complexity, default config, docs, references, examples |
+| `get_problem_questions` | `task` | Application domains and follow-up questions relevant to the task (choices and yes/no flags), e.g. label granularity for segmentation, time behaviour for simulation |
+| `compose_problem_description` | `task`, `answers=None`, `domains=None`, `extra=""` | `description` for `recommend_architecture`, `dynamic_topology`, and pre-flight assumptions (target kind, geometry variation, topology changes, extra symmetries) |
 | `recommend_architecture` | `problem_description`, `input_format`, `max_elements_per_sample`, `dynamic_topology=False`, `target_metric="accuracy"` | `verdict` (`fit`, `weak_fit`, `no_fit`); ranked models with score, matched tasks, rationale, pitfalls, estimated VRAM and hardware tier. On `no_fit`: `missing_capability`, `reason` and `suggested_networks` (name, why, paper) |
 | `estimate_resource_footprint` | `model_name`, `num_elements`, `batch_size=1`, `precision="fp32"` | Training and inference memory, hardware tier, scaling when N doubles, assumptions |
 | `refresh_model_catalog` | none | Sync report: added/removed models, uncurated models, models without docs, import errors |

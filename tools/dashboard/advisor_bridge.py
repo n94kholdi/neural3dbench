@@ -60,6 +60,7 @@ class AdvisorBridge:
         vram_gb: float | None = None,
         target_metric: str = "accuracy",
         top_k: int = 5,
+        dynamic_topology: bool = False,
     ) -> dict[str, Any]:
         """Ranked models for a problem; each row gains ``fits_vram`` against ``vram_gb``.
 
@@ -71,7 +72,8 @@ class AdvisorBridge:
         if self.advisor is not None:
             # Task names are matched by keyword, so turn "surrogate_simulation" into "surrogate simulation".
             result = self.advisor.recommend_architecture(
-                problem_type.replace("_", " "), representation, num_nodes, target_metric=target_metric, top_k=top_k
+                problem_type.replace("_", " "), representation, num_nodes, dynamic_topology=dynamic_topology,
+                target_metric=target_metric, top_k=top_k,
             )
         else:
             result = self._fallback_recommendations(representation, num_nodes, top_k)

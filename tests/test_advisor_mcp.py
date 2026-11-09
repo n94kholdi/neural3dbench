@@ -254,6 +254,8 @@ def test_mcp_server_exposes_tools():
         "estimate_training_budget",
         "generate_benchmark_config",
         "suggest_ablation_matrix",
+        "get_problem_questions",
+        "compose_problem_description",
         "get_benchmark_results",
     }
     result = asyncio.run(server.server.call_tool("get_model_dossier", {"model_name": "siren"}))

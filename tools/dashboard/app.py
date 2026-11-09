@@ -320,13 +320,14 @@ def main() -> None:
         update_classes,
     )
     from tools.dashboard.trainer import Trainer, TrainingConfig
+    from tools.mcp_advisor.problem_schema import compose_problem, problem_questions
     from tools.dashboard.visualizer import class_color, plot_labelled_points, plot_mesh, plot_point_cloud
 
     try:  # tools.mcp_advisor needs pyyaml
-        from tools.mcp_advisor.guardrails import BOUNDARY_CONDITIONS, GPUS, SYMMETRIES, TARGET_KINDS
+        from tools.mcp_advisor.guardrails import BOUNDARY_CONDITIONS, GPUS, SYMMETRIES
         from tools.mcp_advisor.results import best_by
     except ImportError:  # registry fallback: no pre-flight checks or measured results
-        BOUNDARY_CONDITIONS, GPUS, SYMMETRIES, TARGET_KINDS = ("none",), {"RTX4090": None}, (), ("scalar",)
+        BOUNDARY_CONDITIONS, GPUS, SYMMETRIES = ("none",), {"RTX4090": None}, ()
 
         def best_by(rows: list, key: str) -> dict:
             return {}
@@ -434,40 +435,62 @@ def main() -> None:
 
     # ------------------------------------------------------------ 1. advisor
     with advisor_tab:
-        with st.form("problem"):
-            c1, c2, c3, c4 = st.columns(4)
-            task = c1.selectbox("Task domain", TASKS + UNCOVERED_TASKS, format_func=lambda t: t.replace("_", " "))
-            representation = c2.selectbox("Data representation", list(REPRESENTATIONS), format_func=REPRESENTATIONS.get)
-            num_nodes = c3.number_input("Points / vertices per sample", min_value=1, value=10_000, step=1_000)
-            vram_gb = c4.number_input("Target GPU memory (GB)", min_value=0.5, value=8.0, step=1.0)
-            description = st.text_input("Problem description (optional)", placeholder="e.g. CFD pressure on car surfaces")
-            target_metric = st.radio("Optimize for", ("accuracy", "speed"), horizontal=True)
-            with st.expander("Physics & data assumptions (pre-flight checks)"):
-                p1, p2, p3 = st.columns(3)
-                assumptions = {
-                    "boundary_conditions": p1.selectbox("Boundary conditions", BOUNDARY_CONDITIONS),
-                    "target_kind": p2.selectbox("Target kind", TARGET_KINDS,
-                                                help="Vector/tensor targets need rotation equivariance, not invariance."),
-                    "required_symmetries": p3.multiselect("Required symmetries", SYMMETRIES, default=["permutation"]),
-                    "topology_changes": p1.checkbox("Topology changes between samples"),
-                    "geometry_varies": p2.checkbox("Geometry varies between samples"),
-                    "evaluate_at_unseen_resolution": p3.checkbox("Evaluate at an unseen resolution"),
-                    "target_gpu": p1.selectbox("GPU for the time estimate", list(GPUS), index=list(GPUS).index("RTX4090")),
-                    "dataset_size": p2.number_input("Training samples", min_value=1, value=1000, step=100),
-                    "epochs": p3.number_input("Epochs", min_value=1, value=100, step=10),
-                }
-            submitted = st.form_submit_button("Get recommendations", type="primary", icon=":material/auto_awesome:")
+        c1, c2, c3, c4 = st.columns(4)
+        task = c1.selectbox("Task domain", TASKS + UNCOVERED_TASKS, format_func=lambda t: t.replace("_", " "),
+                            help="The questions below change with the task.")
+        representation = c2.selectbox("Data representation", list(REPRESENTATIONS), format_func=REPRESENTATIONS.get)
+        num_nodes = c3.number_input("Points / vertices per sample", min_value=1, value=10_000, step=1_000)
+        vram_gb = c4.number_input("Target GPU memory (GB)", min_value=0.5, value=8.0, step=1.0)
+        schema = problem_questions(task)
+        with st.container(border=True):
+            st.markdown(f"**Describe your {task.replace('_', ' ')} problem**")
+            domains = st.multiselect("Application domain", schema["domains"], key=f"domains_{task}",
+                                     placeholder="Search domains...",
+                                     help="Pick one or more. Boosts models built for this domain. "
+                                          "Not listed? Use Extra keywords below.")
+            answers: dict[str, Any] = {}
+            choices = [q for q in schema["questions"] if q["kind"] == "choice"]
+            flags = [q for q in schema["questions"] if q["kind"] == "flag"]
+            for col, q in zip(st.columns(max(len(choices), 1)), choices):
+                answers[q["key"]] = col.radio(q["label"], list(q["options"]), key=f"q_{task}_{q['key']}",
+                                              help=q["help"] or None)
+            for col, q in zip(st.columns(max(len(flags), 1)), flags):
+                answers[q["key"]] = col.checkbox(q["label"], key=f"q_{task}_{q['key']}", help=q["help"] or None)
+            if not schema["questions"]:
+                st.caption("No registered model covers this task yet; the advisor will say what to add.")
+            extra = st.text_input("Extra keywords (optional)", placeholder="e.g. airfoil, darcy, modelnet")
+        problem = compose_problem(task, answers, domains, extra)
+        target_metric = st.radio("Optimize for", ("accuracy", "speed"), horizontal=True)
+        with st.expander("Pre-flight checks & training budget"):
+            p1, p2, p3 = st.columns(3)
+            physics = task in ("surrogate_simulation", "pde_operator", "field_fitting")
+            symmetries = p2.multiselect("Required symmetries", SYMMETRIES, default=["permutation"])
+            assumptions = {
+                **{k: v for k, v in problem["assumptions"].items() if k != "add_symmetries"},
+                "boundary_conditions": p1.selectbox("Boundary conditions", BOUNDARY_CONDITIONS) if physics else "none",
+                "required_symmetries": sorted(set(symmetries) | set(problem["assumptions"]["add_symmetries"])),
+                "target_gpu": p1.selectbox("GPU for the time estimate", list(GPUS), index=list(GPUS).index("RTX4090")),
+                "dataset_size": p2.number_input("Training samples", min_value=1, value=1000, step=100),
+                "epochs": p3.number_input("Epochs", min_value=1, value=100, step=10),
+            }
+            if not problem["assumptions"]["evaluate_at_unseen_resolution"]:
+                assumptions["evaluate_at_unseen_resolution"] = p3.checkbox("Evaluate at an unseen resolution")
+            if problem["assumptions"]["add_symmetries"]:
+                st.caption(f"Added from your answers: {', '.join(problem['assumptions']['add_symmetries'])} symmetry.")
+        submitted = st.button("Get recommendations", type="primary", icon=":material/auto_awesome:")
+        description = problem["description"]
         if submitted:
             try:
                 st.session_state["recommendations"] = bridge.get_recommendations(
-                    f"{task} {description}", representation, int(num_nodes), vram_gb, target_metric
+                    description, representation, int(num_nodes), vram_gb, target_metric,
+                    dynamic_topology=problem["dynamic_topology"],
                 )
             except (ValueError, KeyError) as exc:
                 st.error(str(exc))
             else:
                 no_fit = st.session_state["recommendations"].get("verdict") == "no_fit"
                 st.session_state["problem_dataset"] = None if no_fit else dataset_for_problem(task, description)
-                st.session_state["problem_context"] = (f"{task} {description}", int(num_nodes), assumptions)
+                st.session_state["problem_context"] = (description, int(num_nodes), assumptions)
 
         result = st.session_state.get("recommendations")
         if result:
@@ -485,6 +508,7 @@ def main() -> None:
                 st.success(f"**{len(result['recommendations'])} models fit this problem**, ranked by the advisor.",
                            icon=":material/check_circle:")
             st.caption(f"{result.get('note', '')} Considered {result.get('considered', 0)} models; source: {result['source']}.")
+            st.caption(f"Advisor read the problem as: `{st.session_state.get('problem_context', ('',))[0]}`")
             if not result["recommendations"]:
                 st.info("No registered model matches this representation.")
             container = st.expander("Closest registered models (not a fit for this task)") if verdict == "no_fit" else st.container()

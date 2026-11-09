@@ -17,7 +17,7 @@ try:
 except ImportError:
     from mcp.server.fastmcp import FastMCP as _Server  # mcp 1.x
 
-from tools.mcp_advisor import guardrails, results
+from tools.mcp_advisor import guardrails, problem_schema, results
 from tools.mcp_advisor.advisor import Advisor
 
 advisor = Advisor()
@@ -30,6 +30,8 @@ server = _Server(
         "segmentation_classification, field_fitting, shape_completion, object_detection, registration. "
         "Instance segmentation, generation and scene flow are not covered: recommend_architecture then returns "
         "verdict no_fit with networks to add; say so instead of proposing a model. "
+        "To define a problem, call get_problem_questions for the task, ask the user, then "
+        "compose_problem_description and pass its description to recommend_architecture. "
         "Memory and time figures are heuristics. "
         "Before training, run audit_problem_assumptions and check_symmetry_and_invariance. "
         "get_benchmark_results returns measured metrics of past training runs; cite them when available."
@@ -196,6 +198,31 @@ def generate_benchmark_config(
     return guardrails.generate_benchmark_config(
         advisor, model_name, dataset_name, num_elements, hardware_target, dataset_size, epochs
     )
+
+
+@server.tool()
+def get_problem_questions(task: str) -> dict:
+    """Application domains and follow-up questions that matter for a task, to define the problem precisely.
+
+    task: surrogate_simulation | pde_operator | segmentation_classification | field_fitting
+          | shape_completion | object_detection | registration
+    Each question has a key, label, kind (choice | flag) and, for choices, option labels.
+    Ask the user these, then pass the answers to compose_problem_description.
+    """
+    return problem_schema.problem_questions(task)
+
+
+@server.tool()
+def compose_problem_description(
+    task: str, answers: dict | None = None, domains: list[str] | None = None, extra: str = ""
+) -> dict:
+    """Turn answers from get_problem_questions into recommend_architecture and pre-flight inputs.
+
+    answers: question key -> option label (choice) or true/false (flag).
+    Returns description (for problem_description), dynamic_topology, and assumptions
+    (target_kind, geometry_varies, topology_changes, evaluate_at_unseen_resolution, add_symmetries).
+    """
+    return problem_schema.compose_problem(task, answers, domains, extra)
 
 
 @server.tool()
