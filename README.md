@@ -10,28 +10,68 @@ benchmarking neural networks for 3D geometry and physics simulations.
 
 ## Supported models
 
-| Model | Representation | Status |
-| --- | --- | --- |
-| Graph Convolutional Network (GCN) | Graph | Implemented |
-| Graph Attention Network (GAT) | Graph | Implemented |
-| MeshGraphNet | Mesh graph | Implemented |
-| Adaptive MeshGraphNet | Adaptive mesh graph | Experimental |
-| PointNet | Point cloud | Implemented |
-| PointNet++ | Hierarchical point cloud | Implemented |
-| PointNeXt | Hierarchical point cloud | Implemented |
-| DGCNN | Point cloud (dynamic k-NN graph) | Implemented |
-| 3D U-Net | Structured voxel grid | Implemented |
-| Fourier Neural Operator (FNO3D) | Structured 3D grid | Implemented |
-| Transolver | Irregular points / mesh nodes | Implemented |
-| SIREN | Continuous coordinates / irregular points | Implemented |
-| MLP | Continuous coordinates / irregular points | Implemented |
-| Deep NURBS | NURBS parameterized 2D domains | Implemented |
-| Geometry-Informed Neural Operator (GINO) | Irregular points via latent grid | Implemented |
-| PCN | Point cloud (shape completion) | Implemented |
-| FoldingNet | Point cloud (autoencoder / completion) | Implemented |
-| PointPillars | LiDAR point cloud (3D detection) | Implemented |
-| VoteNet | Point cloud (3D detection) | Implemented |
-| Deep Closest Point (DCP) | Point-cloud pair (rigid registration) | Implemented |
+Models are grouped by input representation (advisor names in code font), then by task family.
+Rows marked **To do** are planned additions.
+
+<table>
+<thead><tr><th>Representation</th><th>Task</th><th>Model</th><th>Status</th></tr></thead>
+<tbody>
+<tr><td rowspan="22"><b>Point cloud</b><br><code>point_cloud</code></td><td rowspan="8">Backbones: classification and segmentation</td><td><a href="docs/pointnet.md">PointNet</a></td><td>Implemented</td></tr>
+<tr><td><a href="docs/pointnet2.md">PointNet++</a></td><td>Implemented</td></tr>
+<tr><td><a href="docs/pointnext.md">PointNeXt</a></td><td>Implemented</td></tr>
+<tr><td><a href="docs/dgcnn.md">DGCNN</a></td><td>Implemented</td></tr>
+<tr><td><a href="https://arxiv.org/abs/2312.10035">Point Transformer V3 (PTv3)</a></td><td>To do</td></tr>
+<tr><td><a href="https://arxiv.org/abs/1904.08889">KPConv</a></td><td>To do</td></tr>
+<tr><td><a href="https://arxiv.org/abs/2202.07123">PointMLP</a></td><td>To do</td></tr>
+<tr><td><a href="https://arxiv.org/abs/2104.12229">Vector Neurons (VN-DGCNN / VN-PointNet)</a></td><td>To do</td></tr>
+<tr><td rowspan="2">Instance segmentation</td><td><a href="https://arxiv.org/abs/2004.01658">PointGroup</a></td><td>To do</td></tr>
+<tr><td><a href="https://arxiv.org/abs/2210.03105">Mask3D</a></td><td>To do</td></tr>
+<tr><td rowspan="5">Shape completion and generation</td><td><a href="docs/pcn.md">PCN</a></td><td>Implemented</td></tr>
+<tr><td><a href="docs/foldingnet.md">FoldingNet</a></td><td>Implemented</td></tr>
+<tr><td><a href="https://arxiv.org/abs/1906.12320">PointFlow</a></td><td>To do</td></tr>
+<tr><td><a href="https://arxiv.org/abs/2104.03670">Point-Voxel Diffusion (PVD)</a></td><td>To do</td></tr>
+<tr><td><a href="https://arxiv.org/abs/2210.06978">LION</a></td><td>To do</td></tr>
+<tr><td rowspan="2">Object detection</td><td><a href="docs/pointpillars.md">PointPillars</a></td><td>Implemented</td></tr>
+<tr><td><a href="docs/votenet.md">VoteNet</a></td><td>Implemented</td></tr>
+<tr><td rowspan="5">Registration and scene flow</td><td><a href="docs/dcp.md">Deep Closest Point (DCP)</a></td><td>Implemented</td></tr>
+<tr><td><a href="https://arxiv.org/abs/2003.13479">RPM-Net</a></td><td>To do</td></tr>
+<tr><td><a href="https://arxiv.org/abs/1910.12240">PRNet</a></td><td>To do</td></tr>
+<tr><td><a href="https://arxiv.org/abs/2202.06688">GeoTransformer</a></td><td>To do</td></tr>
+<tr><td><a href="https://arxiv.org/abs/1806.01411">FlowNet3D</a></td><td>To do</td></tr>
+<tr><td rowspan="14"><b>Mesh and graph</b><br><code>mesh_graph</code></td><td rowspan="4">General graph networks</td><td><a href="docs/gcn.md">Graph Convolutional Network (GCN)</a></td><td>Implemented</td></tr>
+<tr><td><a href="docs/gat.md">Graph Attention Network (GAT)</a></td><td>Implemented</td></tr>
+<tr><td><a href="https://arxiv.org/abs/2102.09844">EGNN</a></td><td>To do</td></tr>
+<tr><td><a href="https://arxiv.org/abs/2006.10503">SE(3)-Transformer</a></td><td>To do</td></tr>
+<tr><td rowspan="4">Mesh surface networks</td><td><a href="docs/meshnet.md">MeshNet</a></td><td>Implemented</td></tr>
+<tr><td><a href="docs/diffusionnet.md">DiffusionNet</a></td><td>Implemented</td></tr>
+<tr><td><a href="docs/meshwalker.md">MeshWalker</a></td><td>Implemented</td></tr>
+<tr><td><a href="https://arxiv.org/abs/1809.05910">MeshCNN</a></td><td>To do</td></tr>
+<tr><td rowspan="6">Physics surrogates on meshes</td><td><a href="docs/meshgraphnet.md">MeshGraphNet</a></td><td>Implemented</td></tr>
+<tr><td>Adaptive MeshGraphNet</td><td>Experimental</td></tr>
+<tr><td><a href="docs/transolver.md">Transolver</a></td><td>Implemented</td></tr>
+<tr><td><a href="https://arxiv.org/abs/2210.02573">Multiscale MeshGraphNet (BSMS-GNN)</a></td><td>To do</td></tr>
+<tr><td><a href="https://arxiv.org/abs/2411.17164">X-MeshGraphNet</a></td><td>To do</td></tr>
+<tr><td><a href="https://arxiv.org/abs/2302.14376">GNOT</a></td><td>To do</td></tr>
+<tr><td rowspan="8"><b>Voxel grid</b><br><code>voxel_grid</code></td><td rowspan="3">Dense and sparse CNNs</td><td><a href="docs/unet3d.md">3D U-Net</a></td><td>Implemented</td></tr>
+<tr><td><a href="https://arxiv.org/abs/1904.08755">MinkowskiNet</a></td><td>To do</td></tr>
+<tr><td><a href="https://arxiv.org/abs/1907.03739">PVCNN</a></td><td>To do</td></tr>
+<tr><td rowspan="2">Object detection</td><td><a href="https://www.mdpi.com/1424-8220/18/10/3337">SECOND</a></td><td>To do</td></tr>
+<tr><td><a href="https://arxiv.org/abs/2006.11275">CenterPoint</a></td><td>To do</td></tr>
+<tr><td rowspan="3">Neural operators on grids</td><td><a href="docs/fno.md">Fourier Neural Operator (FNO3D)</a></td><td>Implemented</td></tr>
+<tr><td><a href="https://arxiv.org/abs/2204.11127">U-NO</a></td><td>To do</td></tr>
+<tr><td><a href="https://arxiv.org/abs/2111.13802">F-FNO</a></td><td>To do</td></tr>
+<tr><td rowspan="10"><b>Continuous coordinates</b><br><code>continuous_coords</code></td><td rowspan="6">Implicit neural fields</td><td><a href="docs/siren.md">SIREN</a></td><td>Implemented</td></tr>
+<tr><td><a href="docs/mlp.md">MLP</a></td><td>Implemented</td></tr>
+<tr><td><a href="docs/deep_nurbs.md">Deep NURBS</a></td><td>Implemented</td></tr>
+<tr><td><a href="https://arxiv.org/abs/1901.05103">DeepSDF</a></td><td>To do</td></tr>
+<tr><td><a href="https://arxiv.org/abs/2003.04618">Convolutional Occupancy Networks</a></td><td>To do</td></tr>
+<tr><td><a href="https://arxiv.org/abs/2201.05989">Instant-NGP hash encoding</a></td><td>To do</td></tr>
+<tr><td rowspan="4">Neural operators on irregular geometry</td><td><a href="docs/gino.md">Geometry-Informed Neural Operator (GINO)</a></td><td>Implemented</td></tr>
+<tr><td><a href="https://arxiv.org/abs/1910.03193">DeepONet</a></td><td>To do</td></tr>
+<tr><td><a href="https://arxiv.org/abs/2207.05209">Geo-FNO</a></td><td>To do</td></tr>
+<tr><td><a href="https://arxiv.org/abs/2105.14995">Galerkin Transformer</a></td><td>To do</td></tr>
+</tbody>
+</table>
 
 ## Tools
 
